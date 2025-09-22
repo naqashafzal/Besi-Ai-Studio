@@ -1,47 +1,25 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
-import JSZip from 'jszip';
-import { GenerationState, GenerativePart, ExamplePrompt, PromptCategory } from './types';
-import { generateImage, generatePromptFromImage } from './services/geminiService';
-import { EXAMPLE_PROMPTS } from './constants';
-import { UploadIcon, SparklesIcon, DownloadIcon, CreditIcon, ClipboardIcon } from './components/Icons';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { GenerationState, GenerativePart, PromptCategory, Prompt, Session, UserProfile, VisitorProfile, Plan, PaymentSettings, PlanCountryPrice, ContactFormData, ChatMessage } from './types';
+import { generateImage, generateMultiPersonImage, generatePromptFromImage, createChat, generateVideo } from './services/geminiService';
+import * as adminService from './services/adminService';
+import { supabase } from './services/supabaseClient';
+import { DEFAULT_PLANS, VIDEO_LOADING_MESSAGES } from './constants';
+import { SparklesIcon, PhotoIcon, UsersIcon, StarIcon, MailIcon, XMarkIcon, ChatBubbleLeftRightIcon, VideoCameraIcon } from './components/Icons';
 import LoadingIndicator from './components/LoadingIndicator';
 import ImageDisplay from './components/ImageDisplay';
 import ImageUploader from './components/ImageUploader';
-import HistoryDisplay from './components/HistoryDisplay';
 import AdminPanel from './components/AdminPanel';
+import Auth from './components/Auth';
+import MembershipModal from './components/MembershipModal';
+import PricingTable from './components/PricingTable';
+import Header from './components/Header';
+import Footer from './components/Footer';
+import ChatBox from './components/ChatBox';
+import VideoPlayer from './components/VideoPlayer';
+import HistoryDisplay from './components/HistoryDisplay';
+import { Chat } from '@google/genai';
 
-const HISTORY_KEY = 'ai-portrait-history';
-const PROMPTS_KEY = 'ai-portrait-prompts';
-const CREDITS_KEY = 'ai-portrait-credits';
-const HISTORY_LIMIT = 50;
-const INITIAL_CREDITS = 20;
-const GENERATION_COST = 1;
-const EXAMPLE_GENERATION_COST = 1;
-const ADD_CREDITS_AMOUNT = 20;
-
-
-// Component for displaying bulk generated images
-const BulkImageDisplay: React.FC<{ images: { prompt: string, imageUrl: string }[] }> = ({ images }) => {
-  return (
-    <div className="w-full">
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 p-2">
-        {images.map(({ prompt, imageUrl }, index) => (
-          <div key={`${index}-${prompt}`} className="group relative aspect-square animate-fade-in">
-            <img
-              src={imageUrl}
-              alt={prompt.substring(0, 50)}
-              className="w-full h-full object-cover rounded-lg shadow-lg border-2 border-gray-700"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent flex items-end p-2 pointer-events-none rounded-lg">
-              <p className="text-white text-xs leading-tight">{prompt}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
 
 const fileToGenerativePart = (file: File): Promise<GenerativePart> => {
   return new Promise((resolve, reject) => {
@@ -62,627 +40,1484 @@ const fileToGenerativePart = (file: File): Promise<GenerativePart> => {
   });
 };
 
+const dataUrlToFile = async (dataUrl: string, filename: string): Promise<File> => {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    return new File([blob], filename, { type: blob.type });
+};
+
+interface ContactModalProps {
+  onClose: () => void;
+  session: Session | null;
+  profile: UserProfile | null;
+}
+
+const ContactModal: React.FC<ContactModalProps> = ({ onClose, session, profile }) => {
+    const [name, setName] = useState('');
+    const [email, setEmail] = useState('');
+    const [subject, setSubject] = useState('');
+    const [message, setMessage] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState(false);
+
+    useEffect(() => {
+        if (profile?.email) {
+            setEmail(profile.email);
+            // Pre-fill name from email if name field is empty
+            if (!name) {
+                const nameFromEmail = profile.email.split('@')[0]
+                    .replace(/[._0-9]/g, ' ') // Replace dots, underscores, numbers with space
+                    .trim()
+                    .replace(/\b\w/g, l => l.toUpperCase()); // Capitalize words
+                setName(nameFromEmail);
+            }
+        }
+    }, [profile]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!email.trim() || !subject.trim() || !message.trim()) {
+            setError("Please fill out all required fields.");
+            return;
+        }
+        setLoading(true);
+        setError('');
+        try {
+            await adminService.submitContactForm({ name, email, subject, message });
+            setSuccess(true);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'An unexpected error occurred.');
+        } finally {
+            setLoading(false);
+        }
+    };
+    
+    return (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 animate-fade-in">
+            <div className="bg-panel rounded-2xl shadow-2xl border border-border w-full max-w-lg relative">
+                <button
+                    onClick={onClose}
+                    className="absolute top-4 right-4 text-text-secondary hover:text-text-primary transition-colors"
+                    aria-label="Close contact form"
+                >
+                    <XMarkIcon className="w-6 h-6" />
+                </button>
+                <div className="p-8 space-y-6">
+                    <div className="text-center space-y-2">
+                        <div className="inline-block p-3 bg-brand/10 rounded-full">
+                           <MailIcon className="w-10 h-10 text-brand" />
+                        </div>
+                        <h2 className="text-3xl font-bold text-text-primary">Contact Us</h2>
+                        <p className="text-text-secondary">
+                            Have a question or feedback? We'd love to hear from you.
+                            <br />
+                            You can also email us directly at{' '}
+                            <a href="mailto:ai@nullpk.com" className="font-medium text-brand hover:underline">
+                                ai@nullpk.com
+                            </a>.
+                        </p>
+                    </div>
+
+                    {success ? (
+                        <div className="text-center p-6 bg-green-900/30 rounded-lg border border-green-700">
+                            <h3 className="text-xl font-bold text-green-300">Message Sent!</h3>
+                            <p className="text-green-400 mt-2">Thank you for reaching out. We'll get back to you as soon as possible.</p>
+                            <button onClick={onClose} className="mt-4 px-4 py-2 bg-brand text-white font-semibold rounded-lg hover:bg-brand-hover">Close</button>
+                        </div>
+                    ) : (
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label htmlFor="contact-name" className="block text-sm font-medium text-text-secondary mb-1">Name</label>
+                                    <input id="contact-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your Name" className="w-full p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand" />
+                                </div>
+                                <div>
+                                    <label htmlFor="contact-email" className="block text-sm font-medium text-text-secondary mb-1">Email <span className="text-red-400">*</span></label>
+                                    <input id="contact-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="your@email.com" required className="w-full p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand" />
+                                </div>
+                            </div>
+                            <div>
+                                <label htmlFor="contact-subject" className="block text-sm font-medium text-text-secondary mb-1">Subject <span className="text-red-400">*</span></label>
+                                <input id="contact-subject" type="text" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="How can we help?" required className="w-full p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand" />
+                            </div>
+                            <div>
+                                <label htmlFor="contact-message" className="block text-sm font-medium text-text-secondary mb-1">Message <span className="text-red-400">*</span></label>
+                                <textarea id="contact-message" value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Your message..." required rows={5} className="w-full p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand resize-y"></textarea>
+                            </div>
+                            {error && <p className="text-red-400 text-sm text-center">{error}</p>}
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="w-full py-3 px-4 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover transition-colors disabled:opacity-50 disabled:cursor-wait"
+                            >
+                                {loading ? 'Sending...' : 'Send Message'}
+                            </button>
+                        </form>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
 const App: React.FC = () => {
   const [prompt, setPrompt] = useState<string>('');
   const [generationState, setGenerationState] = useState<GenerationState>(GenerationState.IDLE);
   const [generatedImageUrls, setGeneratedImageUrls] = useState<string[] | null>(null);
+  const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // Auth & Profile state
+  const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [visitorProfile, setVisitorProfile] = useState<VisitorProfile | null>(null);
+  const [authModalView, setAuthModalView] = useState<'sign_in' | 'sign_up' | null>(null);
+  const [isMembershipModalOpen, setIsMembershipModalOpen] = useState(false);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [planCountryPrices, setPlanCountryPrices] = useState<PlanCountryPrice[]>([]);
+  const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
+
+  // Generation Mode
+  const [generationMode, setGenerationMode] = useState<'single' | 'multi' | 'video'>('single');
   
   // Image states
   const [uploadedImage, setUploadedImage] = useState<File | null>(null);
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
-  const [styleImage, setStyleImage] = useState<File | null>(null);
-  const [styleImageDataUrl, setStyleImageDataUrl] = useState<string | null>(null);
+  const [uploadedImageTwo, setUploadedImageTwo] = useState<File | null>(null);
+  const [imageDataUrlTwo, setImageDataUrlTwo] = useState<string | null>(null);
+  const [imageSize, setImageSize] = useState<'1024' | '2048'>('1024');
+  const [aspectRatio, setAspectRatio] = useState<'1:1' | '16:9' | '9:16' | '4:3' | '3:4'>('1:1');
   
+  // "Photo to Prompt" feature states
+  const [promptGenImage, setPromptGenImage] = useState<File | null>(null);
+  const [promptGenImageDataUrl, setPromptGenImageDataUrl] = useState<string | null>(null);
+  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
+  const [promptFocus, setPromptFocus] = useState({
+    realism: true,
+    style: true,
+    background: true,
+    clothing: false,
+    lighting: false,
+  });
+  const [promptKeywords, setPromptKeywords] = useState('');
+
+
   // Prompt examples state
-  const [examplePrompts, setExamplePrompts] = useState<PromptCategory[]>(EXAMPLE_PROMPTS);
+  const [examplePrompts, setExamplePrompts] = useState<PromptCategory[]>([]);
+  const [promptsLoading, setPromptsLoading] = useState<boolean>(true);
   const [promptSearch, setPromptSearch] = useState('');
   const [showAllPrompts, setShowAllPrompts] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<string>(EXAMPLE_PROMPTS[0].title);
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
+
+  // Admin panel state
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const pricingTableRef = useRef<HTMLElement>(null);
+
+  // Queue system state for visitors
+  const [isSystemBusy, setIsSystemBusy] = useState<boolean>(false);
+  const [queue, setQueue] = useState<string[]>([]);
+  const [visitorId, setVisitorId] = useState<string>('');
+
+  // Contact modal state
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+
+  // Chat state
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatSession, setChatSession] = useState<Chat | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   // History state
-  const [history, setHistory] = useState<string[]>([]);
+  const [historyImageUrls, setHistoryImageUrls] = useState<string[]>([]);
+
+  const IMAGE_CREDIT_COST = 1;
+  const VIDEO_CREDIT_COST = 5;
+
+  // Auth Effect
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (!session) { // User logged out, reset user profile
+        setProfile(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
   
-  // Admin state
-  const [showAdminPanel, setShowAdminPanel] = useState(false);
-  const [generatingExample, setGeneratingExample] = useState<{ prompt: string; category: string } | null>(null);
-  const [editingPrompt, setEditingPrompt] = useState<{ prompt: ExamplePrompt; categoryTitle: string } | null>(null);
+  // Visitor ID Effect
+  useEffect(() => {
+    if (!session) {
+        let id = sessionStorage.getItem('visitorId');
+        if (!id) {
+            id = Math.random().toString(36).substring(2, 15);
+            sessionStorage.setItem('visitorId', id);
+        }
+        setVisitorId(id);
+    } else {
+        // Clear visitorId when user logs in
+        sessionStorage.removeItem('visitorId');
+        setVisitorId('');
+        // If the visitor was in the queue, remove them
+        if (visitorId) {
+            setQueue(q => q.filter(id => id !== visitorId));
+        }
+    }
+  }, [session, visitorId]);
+  
+  // Visitor Profile Effect
+  useEffect(() => {
+    if (session) {
+      setVisitorProfile(null); // Clear visitor profile when logged in
+      return;
+    }
+    
+    try {
+        const storedVisitor = localStorage.getItem('visitorProfile');
+        const today = new Date().toISOString().split('T')[0];
+        let currentVisitor: VisitorProfile;
 
-  // Bulk generation state
-  const [isBulkGenerating, setIsBulkGenerating] = useState<boolean>(false);
-  const [bulkGenerationProgress, setBulkGenerationProgress] = useState({ current: 0, total: 0 });
-  const [bulkGeneratedImages, setBulkGeneratedImages] = useState<{ prompt: string, imageUrl: string }[]>([]);
+        if (storedVisitor) {
+            currentVisitor = JSON.parse(storedVisitor);
+            if (currentVisitor.lastVisitDate !== today) {
+                // New day, reset credits
+                currentVisitor = { credits: 10, lastVisitDate: today };
+            }
+        } else {
+            // First time visitor
+            currentVisitor = { credits: 10, lastVisitDate: today };
+        }
+        setVisitorProfile(currentVisitor);
+        localStorage.setItem('visitorProfile', JSON.stringify(currentVisitor));
+    } catch (e) {
+        console.error("Failed to manage visitor profile:", e);
+        setVisitorProfile({ credits: 10, lastVisitDate: new Date().toISOString().split('T')[0] });
+    }
+  }, [session]);
 
-  // Credit system state
-  const [credits, setCredits] = useState<number>(0);
+  // Queue Processing Effect for Visitors
+  useEffect(() => {
+    if (isSystemBusy || queue.length === 0 || !visitorId) {
+        return;
+    }
 
-  // Style prompt generator state
-  const [isGeneratingStylePrompt, setIsGeneratingStylePrompt] = useState(false);
-  const [generatedStylePrompt, setGeneratedStylePrompt] = useState('');
-  const [stylePromptError, setStylePromptError] = useState<string | null>(null);
+    const processQueue = async () => {
+        setIsSystemBusy(true);
+        const nextInQueueId = queue[0];
 
+        if (nextInQueueId === visitorId && uploadedImage && prompt) {
+            // It's this user's turn
+            setGenerationState(GenerationState.LOADING);
+            setError(null);
+            setGeneratedImageUrls(null);
+            
+            try {
+                const baseImagePart = await fileToGenerativePart(uploadedImage);
+                const imageUrls = await generateImage(prompt, baseImagePart, imageSize, aspectRatio);
+                setGeneratedImageUrls(imageUrls);
+                setGenerationState(GenerationState.SUCCESS);
+                setHistoryImageUrls(prev => [...imageUrls, ...prev]);
+
+                const newCredits = (visitorProfile?.credits ?? 1) - 1;
+                updateUserCredits(newCredits);
+            } catch (err) {
+                console.error(err);
+                setError(err instanceof Error ? err.message : 'An unknown error occurred during image generation.');
+                setGenerationState(GenerationState.ERROR);
+            } finally {
+                setQueue(q => q.slice(1));
+                setIsSystemBusy(false);
+            }
+        } else if (nextInQueueId !== visitorId) {
+            // Simulate another user's generation
+            const randomProcessingTime = 8000 + Math.random() * 7000; // 8-15 seconds
+            setTimeout(() => {
+                setQueue(q => q.slice(1));
+                setIsSystemBusy(false);
+            }, randomProcessingTime);
+        } else {
+             // This case handles if it's our turn but we don't have an image/prompt
+             // It's a failsafe to prevent getting stuck
+            setQueue(q => q.slice(1));
+            setIsSystemBusy(false);
+        }
+    };
+
+    processQueue();
+  }, [queue, isSystemBusy, visitorId, uploadedImage, prompt, visitorProfile, imageSize, aspectRatio]);
+
+  const updateUserCredits = (newCredits: number) => {
+    if (session && profile) {
+      const newProfile = { ...profile, credits: newCredits };
+      setProfile(newProfile);
+    } else if (visitorProfile) {
+      const newVisitorProfile = { ...visitorProfile, credits: newCredits };
+      setVisitorProfile(newVisitorProfile);
+      localStorage.setItem('visitorProfile', JSON.stringify(newVisitorProfile));
+    }
+  };
+
+  // Fetch Plans & Settings Effect
+  useEffect(() => {
+    const fetchSharedData = async () => {
+        try {
+            const [fetchedPlans, settings, countryPrices] = await Promise.all([
+                adminService.getPlans(),
+                adminService.getPaymentSettings(),
+                adminService.getPlanCountryPrices()
+            ]);
+            // Use fetched plans if available, otherwise use defaults as a fallback
+            if (fetchedPlans && fetchedPlans.length > 0) {
+                setPlans(fetchedPlans);
+            } else {
+                console.warn("No plans found in the database. Using default plan data.");
+                setPlans(DEFAULT_PLANS);
+            }
+            setPaymentSettings(settings);
+            setPlanCountryPrices(countryPrices || []);
+        } catch (error) {
+            console.error("Error fetching shared data (plans, settings):", error);
+            // On failure, use default plans to ensure the UI is still functional
+            setPlans(DEFAULT_PLANS);
+        }
+    };
+    fetchSharedData();
+  }, []);
+
+  // Profile & Credits Effect
+  useEffect(() => {
+    const getProfile = async () => {
+      if (session?.user) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, email, credits, plan, role, credits_reset_at, phone, country')
+          .eq('id', session.user.id)
+          .single();
+
+        if (error) {
+          console.error('Error fetching profile:', error);
+          setProfile(null);
+          return;
+        }
+
+        if (data) {
+          // Check for credit renewal
+          const lastReset = new Date(data.credits_reset_at);
+          const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+          if (lastReset < thirtyDaysAgo) {
+            const planDetails = plans.find(p => p.name === data.plan);
+            const creditsToSet = planDetails ? planDetails.credits_per_month : (data.plan === 'pro' ? 1000 : 80);
+            
+            const { data: updatedProfile, error: updateError } = await supabase
+              .from('profiles')
+              .update({ credits: creditsToSet, credits_reset_at: new Date().toISOString() })
+              .eq('id', session.user.id)
+              .select('id, email, credits, plan, role, credits_reset_at, phone, country')
+              .single();
+            
+            if (updateError) {
+              console.error("Error renewing credits:", updateError);
+              setProfile(data); // Set old data on error
+            } else {
+              setProfile(updatedProfile); // Set renewed data
+            }
+          } else {
+            setProfile(data); // Set current data
+          }
+        }
+      } else {
+        setProfile(null);
+      }
+    };
+    if (plans.length > 0) { // Only fetch profile once plans are loaded
+        getProfile();
+    }
+  }, [session, plans]);
+  
+  const handleModeChange = useCallback((mode: 'single' | 'multi' | 'video') => {
+    setGenerationMode(mode);
+    setGeneratedImageUrls(null);
+    setGeneratedVideoUrl(null);
+    setGenerationState(GenerationState.IDLE);
+    setError(null);
+  }, []);
+  
+  // Reset premium/admin features if user plan/role changes or they log out
+  useEffect(() => {
+    const canUsePro = session && profile?.plan === 'pro';
+    const canUseAdmin = session && profile?.role === 'admin';
+
+    if (!canUsePro) {
+        if (aspectRatio !== '1:1') setAspectRatio('1:1');
+        if (imageSize !== '1024') setImageSize('1024');
+    }
+
+    if (!canUseAdmin && generationMode === 'video') {
+        handleModeChange('single');
+    }
+  }, [profile, session, generationMode, handleModeChange]);
+
+  const handleUpgradeToPro = async () => {
+    if (!session?.user) return;
+    const proPlan = plans.find(p => p.name === 'pro');
+    if (!proPlan) {
+        setError("Pro plan details not available. Please try again later.");
+        return;
+    }
+
+    try {
+        const { data, error } = await supabase
+            .from('profiles')
+            .update({ 
+                plan: 'pro', 
+                credits: proPlan.credits_per_month, 
+                credits_reset_at: new Date().toISOString() 
+            })
+            .eq('id', session.user.id)
+            .select('id, email, credits, plan, role, credits_reset_at, phone, country')
+            .single();
+
+        if (error) throw error;
+        if (data) {
+            setProfile(data);
+            setIsMembershipModalOpen(false);
+        }
+    } catch (err) {
+        console.error("Error upgrading to pro:", err);
+        setError("Could not complete upgrade. Please try again.");
+    }
+  };
 
   useEffect(() => {
-    try {
-      // Load History
-      const storedHistory = localStorage.getItem(HISTORY_KEY);
-      if (storedHistory) setHistory(JSON.parse(storedHistory));
-      
-      // Load Prompts
-      const storedPrompts = localStorage.getItem(PROMPTS_KEY);
-      if (storedPrompts) {
-        const parsedPrompts = JSON.parse(storedPrompts);
-        setExamplePrompts(parsedPrompts);
-        if (parsedPrompts.length > 0 && !parsedPrompts.some((p: PromptCategory) => p.title === selectedCategory)) {
-          setSelectedCategory(parsedPrompts[0].title);
+    const fetchPrompts = async () => {
+      setPromptsLoading(true);
+      try {
+        const promptsFromDb = await adminService.getPrompts();
+        setExamplePrompts(promptsFromDb);
+        if (promptsFromDb && promptsFromDb.length > 0) {
+          setSelectedCategory(promptsFromDb[0].title);
+        } else {
+          setSelectedCategory('');
         }
+      } catch (error) {
+        console.error("Failed to fetch example prompts from Supabase:", error);
+        setError("Could not load example prompts. Please check your connection and try again.");
+      } finally {
+        setPromptsLoading(false);
       }
-
-      // Load Credits
-      const storedCredits = localStorage.getItem(CREDITS_KEY);
-      if (storedCredits) {
-        setCredits(JSON.parse(storedCredits));
-      } else {
-        setCredits(INITIAL_CREDITS);
-      }
-
-    } catch (error) {
-      console.error("Failed to parse data from localStorage", error);
-      setHistory([]);
-      setExamplePrompts(EXAMPLE_PROMPTS);
-      setCredits(INITIAL_CREDITS);
-    }
+    };
+    fetchPrompts();
   }, []);
   
   useEffect(() => {
-    try {
-      localStorage.setItem(PROMPTS_KEY, JSON.stringify(examplePrompts));
-    } catch (e) {
-      console.error("Failed to save prompts to localStorage:", e);
-    }
-  }, [examplePrompts]);
-  
-  useEffect(() => {
-    try {
-      localStorage.setItem(CREDITS_KEY, JSON.stringify(credits));
-    } catch (e) {
-      console.error("Failed to save credits to localStorage:", e);
-    }
-  }, [credits]);
-
-  const spendCredits = useCallback((amount: number): boolean => {
-    if (credits < amount) {
-      setError(`Not enough credits. This action costs ${amount} credits.`);
-      return false;
-    }
-    setCredits(prev => prev - amount);
-    return true;
-  }, [credits]);
-
-  const addCredits = (amount: number) => {
-    setCredits(prev => prev + amount);
-  };
-
-  const addToHistory = (urls: string[]) => {
-    setHistory(prev => {
-      const newHistory = [...urls, ...prev].slice(0, HISTORY_LIMIT);
-      try {
-        localStorage.setItem(HISTORY_KEY, JSON.stringify(newHistory));
-      } catch (e) {
-        console.error("Failed to save history to localStorage:", e);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.altKey && event.key === 'a') {
+        if (profile?.role === 'admin') {
+          event.preventDefault();
+          setIsAdminPanelOpen(prev => !prev);
+        }
       }
-      return newHistory;
-    });
-  };
+       if (event.key === 'Escape') {
+        if (isChatOpen) setIsChatOpen(false);
+        if (isAdminPanelOpen) setIsAdminPanelOpen(false);
+        if (isContactModalOpen) setIsContactModalOpen(false);
+        if (isMembershipModalOpen) setIsMembershipModalOpen(false);
+        if (authModalView) setAuthModalView(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [profile, isChatOpen, isAdminPanelOpen, isContactModalOpen, isMembershipModalOpen, authModalView]);
+  
+  // Admin Data Fetching
+  useEffect(() => {
+    const fetchAdminData = async () => {
+        if (isAdminPanelOpen && profile?.role === 'admin') {
+            try {
+                const users = await adminService.getUsers();
+                setAllUsers(users);
+                // Plans, prices and settings are already fetched globally
+            } catch (error) {
+                console.error("Error fetching admin data:", error);
+                setError("Could not load administrator data.");
+            }
+        }
+    };
+    fetchAdminData();
+  }, [isAdminPanelOpen, profile?.role]);
 
-  const clearHistory = () => {
-    setHistory([]);
-    try {
-      localStorage.removeItem(HISTORY_KEY);
-    } catch (e) {
-      console.error("Failed to remove history from localStorage:", e);
-    }
-  };
 
-  const handleImageChange = useCallback((file: File | null) => {
-    setUploadedImage(file);
+  const handleImageChange = (file: File | null) => {
     if (file) {
+      setUploadedImage(file);
       const reader = new FileReader();
       reader.onload = (e) => setImageDataUrl(e.target?.result as string);
       reader.readAsDataURL(file);
     } else {
+      setUploadedImage(null);
       setImageDataUrl(null);
     }
-  }, []);
+  };
 
-  const handleStyleImageChange = useCallback((file: File | null) => {
-    setStyleImage(file);
+  const handleImageTwoChange = (file: File | null) => {
     if (file) {
+        setUploadedImageTwo(file);
         const reader = new FileReader();
-        reader.onload = (e) => setStyleImageDataUrl(e.target?.result as string);
+        reader.onload = (e) => setImageDataUrlTwo(e.target?.result as string);
         reader.readAsDataURL(file);
     } else {
-        setStyleImageDataUrl(null);
+        setUploadedImageTwo(null);
+        setImageDataUrlTwo(null);
     }
-  }, []);
+  };
 
+  const handlePromptGenImageChange = (file: File | null) => {
+    if (file) {
+      setPromptGenImage(file);
+      const reader = new FileReader();
+      reader.onload = (e) => setPromptGenImageDataUrl(e.target?.result as string);
+      reader.readAsDataURL(file);
+    } else {
+      setPromptGenImage(null);
+      setPromptGenImageDataUrl(null);
+    }
+  };
 
-  const handleGenerateClick = useCallback(async () => {
-    if (!prompt || !uploadedImage) {
-      setError('Please upload a base image and enter a prompt.');
+  const currentCredits = session ? profile?.credits : visitorProfile?.credits;
+  
+  const handleGeneratePromptFromImage = async () => {
+    if ((currentCredits ?? 0) < IMAGE_CREDIT_COST) {
+        setError("You don't have enough credits.");
+        if (!session) setAuthModalView('sign_up');
+        return;
+    }
+    if (!promptGenImage) {
+        setError("Please upload an image to generate a prompt from.");
+        return;
+    }
+    setIsGeneratingPrompt(true);
+    setError(null);
+    try {
+        const imagePart = await fileToGenerativePart(promptGenImage);
+        const generatedPrompt = await generatePromptFromImage(imagePart, promptFocus, promptKeywords);
+        setPrompt(generatedPrompt);
+        
+        const newCredits = (currentCredits ?? 0) - IMAGE_CREDIT_COST;
+        if (session) {
+            const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', session.user.id).select().single();
+            if(data) setProfile(p => p ? {...p, credits: data.credits} : null);
+        } else {
+            updateUserCredits(newCredits);
+        }
+
+    } catch (err) {
+        console.error(err);
+        setError(err instanceof Error ? err.message : 'An unknown error occurred during prompt generation.');
+    } finally {
+        setIsGeneratingPrompt(false);
+    }
+  };
+
+  const handleGenerateImage = useCallback(async () => {
+    if ((currentCredits ?? 0) < IMAGE_CREDIT_COST) {
+      setError("You're out of credits. Sign up for 80 more!");
+      if (!session) setAuthModalView('sign_up');
       return;
     }
 
-    // Lowered limit to 650KB to account for ~33% base64 encoding overhead and stay under 1MB server limit.
-    const MAX_COMBINED_SIZE_BYTES = 650 * 1024;
-    const totalSize = (uploadedImage?.size || 0) + (styleImage?.size || 0);
+    if (imageSize === '2048' && (!session || profile?.plan !== 'pro')) {
+        setError('HD image size is a Pro feature. Please sign up or upgrade to use it.');
+        if (session) {
+            setIsMembershipModalOpen(true);
+        } else {
+            setAuthModalView('sign_up');
+        }
+        return;
+    }
 
-    if (totalSize > MAX_COMBINED_SIZE_BYTES) {
-        setError(`The combined size of your images is too large for the server, even after optimization. Please try using smaller source images or only a single image.`);
+    if (!prompt.trim() || !uploadedImage) {
+      setError('Please upload a base image and enter a prompt.');
+      return;
+    }
+    
+    // Logged-in user: Generate directly
+    if (session) {
+        setGenerationState(GenerationState.LOADING);
+        setError(null);
+        setGeneratedImageUrls(null);
+        try {
+          const baseImagePart = await fileToGenerativePart(uploadedImage);
+          const imageUrls = await generateImage(prompt, baseImagePart, imageSize, aspectRatio);
+          
+          setGeneratedImageUrls(imageUrls);
+          setGenerationState(GenerationState.SUCCESS);
+          setHistoryImageUrls(prev => [...imageUrls, ...prev]);
+
+          const newCredits = (currentCredits ?? 0) - IMAGE_CREDIT_COST;
+          const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', session.user.id).select().single();
+          if (data) setProfile(p => p ? {...p, credits: data.credits} : null);
+
+        } catch (err) {
+          console.error(err);
+          setError(err instanceof Error ? err.message : 'An unknown error occurred during image generation.');
+          setGenerationState(GenerationState.ERROR);
+        }
         return;
     }
     
-    if (!spendCredits(GENERATION_COST)) return;
+    // Visitor: Join the queue
+    if (!session) {
+        if (!queue.includes(visitorId)) {
+            setQueue(q => [...q, visitorId]);
+            setGenerationState(GenerationState.QUEUED);
+        }
+    }
+  }, [prompt, uploadedImage, session, profile, visitorProfile, currentCredits, queue, visitorId, imageSize, aspectRatio]);
+
+  const handleGenerateMultiPersonImage = useCallback(async () => {
+    if ((currentCredits ?? 0) < IMAGE_CREDIT_COST) {
+        setError("You're out of credits.");
+        if (!session) setAuthModalView('sign_up');
+        return;
+    }
+
+    if (!session) {
+        setError("Multi-person generation is available for logged-in users only.");
+        setAuthModalView('sign_up');
+        return;
+    }
+
+    if (imageSize === '2048' && profile?.plan !== 'pro') {
+        setError('HD image size is a Pro feature. Please upgrade to use it.');
+        setIsMembershipModalOpen(true);
+        return;
+    }
+
+    if (!prompt.trim() || !uploadedImage || !uploadedImageTwo) {
+        setError('Please upload two base images and enter a prompt.');
+        return;
+    }
 
     setGenerationState(GenerationState.LOADING);
     setError(null);
     setGeneratedImageUrls(null);
-    setBulkGeneratedImages([]);
-
     try {
-      const baseImagePart = await fileToGenerativePart(uploadedImage);
-      const styleImagePart = styleImage ? await fileToGenerativePart(styleImage) : null;
-      
-      const imageUrls = await generateImage(prompt, baseImagePart, styleImagePart);
-      
-      setGeneratedImageUrls(imageUrls);
-      addToHistory(imageUrls);
-      setGenerationState(GenerationState.SUCCESS);
-    } catch (e) {
-      console.error(e);
-      // Refund credits on failure
-      addCredits(GENERATION_COST);
-      const errorMessage = e instanceof Error ? e.message : 'An unexpected error occurred.';
-      setError(errorMessage);
-      setGenerationState(GenerationState.ERROR);
+        const baseImagePart1 = await fileToGenerativePart(uploadedImage);
+        const baseImagePart2 = await fileToGenerativePart(uploadedImageTwo);
+        const imageUrls = await generateMultiPersonImage(prompt, baseImagePart1, baseImagePart2, imageSize, aspectRatio);
+        
+        setGeneratedImageUrls(imageUrls);
+        setGenerationState(GenerationState.SUCCESS);
+        setHistoryImageUrls(prev => [...imageUrls, ...prev]);
+
+        const newCredits = (currentCredits ?? 0) - IMAGE_CREDIT_COST;
+        const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', session.user.id).select().single();
+        if (data) setProfile(p => p ? {...p, credits: data.credits} : null);
+
+    } catch (err) {
+        console.error(err);
+        setError(err instanceof Error ? err.message : 'An unknown error occurred during image generation.');
+        setGenerationState(GenerationState.ERROR);
     }
-  }, [prompt, uploadedImage, styleImage, credits, spendCredits]);
+  }, [prompt, uploadedImage, uploadedImageTwo, session, profile, currentCredits, imageSize, aspectRatio]);
   
-  const useExamplePrompt = useCallback((example: ExamplePrompt) => {
-    setPrompt(example.prompt);
-    
-    // Smooth scroll to the top to see the prompt input field
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
-
-  const handleBulkGenerate = async () => {
-    if (!uploadedImage) {
-        setError('Please upload a base image before starting a bulk generation.');
-        return;
-    }
-
-    const allPrompts = examplePrompts.flatMap(cat => cat.prompts);
-    const totalCost = allPrompts.length;
-    
-    if (!spendCredits(totalCost)) {
-      setError(`Bulk generation requires ${totalCost} credits, but you only have ${credits}.`);
+  const handleGenerateVideo = useCallback(async () => {
+    if (profile?.role !== 'admin') {
+      setError("Video generation is an admin-only feature.");
+      handleModeChange('single');
       return;
     }
 
-    setIsBulkGenerating(true);
+    if ((currentCredits ?? 0) < VIDEO_CREDIT_COST) {
+        setError(`You need at least ${VIDEO_CREDIT_COST} credits to generate a video.`);
+        if (!session) setAuthModalView('sign_up');
+        return;
+    }
+    if (!prompt.trim()) {
+        setError('Please enter a prompt to describe the video.');
+        return;
+    }
+    if (!session) {
+        setError("Video generation is available for logged-in users only.");
+        setAuthModalView('sign_up');
+        return;
+    }
+
+
+    setGenerationState(GenerationState.GENERATING_VIDEO);
     setError(null);
     setGeneratedImageUrls(null);
-    setBulkGeneratedImages([]);
-    setBulkGenerationProgress({ current: 0, total: allPrompts.length });
+    setGeneratedVideoUrl(null);
 
-    const generated: { prompt: string, imageUrl: string }[] = [];
-    let failedCount = 0;
+    // Revoke old blob URL if it exists to prevent memory leaks
+    if (generatedVideoUrl && generatedVideoUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(generatedVideoUrl);
+    }
 
     try {
-        const baseImagePart = await fileToGenerativePart(uploadedImage);
-
-        for (let i = 0; i < allPrompts.length; i++) {
-            const currentPrompt = allPrompts[i];
-            setBulkGenerationProgress({ current: i + 1, total: allPrompts.length });
-            try {
-                // Introduce a delay to avoid rate limiting
-                await new Promise(resolve => setTimeout(resolve, 1200));
-                
-                const imageUrls = await generateImage(currentPrompt.prompt, baseImagePart, null);
-                if (imageUrls.length > 0) {
-                    const newImage = { prompt: currentPrompt.prompt, imageUrl: imageUrls[0] };
-                    generated.push(newImage);
-                    setBulkGeneratedImages(prev => [...prev, newImage]);
-                    addToHistory([imageUrls[0]]);
-                } else {
-                   failedCount++;
-                }
-            } catch (err) {
-                console.error(`Failed to generate for prompt: "${currentPrompt.prompt}"`, err);
-                failedCount++;
-            }
-        }
-
-        // After generation, create and download ZIP
-        const zip = new JSZip();
-        await Promise.all(generated.map(async ({ imageUrl, prompt }) => {
-            try {
-                const response = await fetch(imageUrl);
-                const blob = await response.blob();
-                // Sanitize prompt for filename
-                const fileName = `${prompt.substring(0, 30).replace(/[^a-z0-9]/gi, '_')}.png`;
-                zip.file(fileName, blob);
-            } catch (e) {
-                console.error("Error fetching or adding image to zip:", e);
-            }
-        }));
-
-        const zipBlob = await zip.generateAsync({ type: 'blob' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(zipBlob);
-        link.download = 'ai-portraits-collection.zip';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        const baseImagePart = uploadedImage ? await fileToGenerativePart(uploadedImage) : null;
         
-        if (failedCount > 0) {
-            // Refund credits for failed images
-            addCredits(failedCount);
-            setError(`Bulk generation complete. ${failedCount} images failed to generate. ${failedCount} credits have been refunded.`);
+        const downloadLink = await generateVideo(prompt, baseImagePart);
+        
+        const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
+        if (!response.ok) {
+            const errorBody = await response.text();
+            throw new Error(`Failed to download video file (${response.status}): ${errorBody}`);
         }
+        const videoBlob = await response.blob();
+        const blobUrl = URL.createObjectURL(videoBlob);
+        
+        setGeneratedVideoUrl(blobUrl);
+        setGenerationState(GenerationState.SUCCESS);
 
-    } catch (e) {
-        const errorMessage = e instanceof Error ? e.message : 'An unexpected error occurred during bulk generation.';
-        setError(errorMessage);
-        // Refund all credits on catastrophic failure
-        addCredits(totalCost);
-    } finally {
-        setIsBulkGenerating(false);
+        const newCredits = (currentCredits ?? 0) - VIDEO_CREDIT_COST;
+        const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', session.user.id).select().single();
+        if (data) setProfile(p => p ? {...p, credits: data.credits} : null);
+
+    } catch (err) {
+        console.error(err);
+        setError(err instanceof Error ? err.message : 'An unknown error occurred during video generation.');
+        setGenerationState(GenerationState.ERROR);
+    }
+
+  }, [prompt, uploadedImage, session, profile, currentCredits, generatedVideoUrl, handleModeChange]);
+  
+  const handleLeaveQueue = () => {
+    setQueue(q => q.filter(id => id !== visitorId));
+    setGenerationState(GenerationState.IDLE);
+  };
+
+  const handleCategoryClick = (title: string) => {
+    setSelectedCategory(title);
+    setShowAllPrompts(false); 
+    setPromptSearch('');
+  };
+  
+  const handleExampleClick = async (p: Prompt) => {
+    setPrompt(p.text);
+    // If the example prompt has an associated image, load it,
+    // replacing any image the user has already uploaded.
+    if (p.imageUrl) {
+      try {
+        setError(null); // Clear previous errors
+        const file = await dataUrlToFile(p.imageUrl, 'example-image.png');
+        handleImageChange(file);
+      } catch (e) {
+        console.error("Failed to load example image", e);
+        setError("Could not load the example image.");
+      }
     }
   };
-  
-  const addPrompt = (newPrompt: ExamplePrompt, categoryTitle: string) => {
-    setExamplePrompts(prev => {
-      const newPrompts = JSON.parse(JSON.stringify(prev));
-      const categoryIndex = newPrompts.findIndex((c: PromptCategory) => c.title === categoryTitle);
-      if (categoryIndex > -1) {
-        newPrompts[categoryIndex].prompts.push(newPrompt);
-      } else {
-        newPrompts.push({ title: categoryTitle, prompts: [newPrompt] });
-        setSelectedCategory(categoryTitle);
-      }
-      return newPrompts;
-    });
-  };
 
-  const removePrompt = (promptText: string, categoryTitle: string) => {
-    setExamplePrompts(prev => {
-      const newPrompts = JSON.parse(JSON.stringify(prev));
-      const categoryIndex = newPrompts.findIndex((c: PromptCategory) => c.title === categoryTitle);
-      if (categoryIndex > -1) {
-        newPrompts[categoryIndex].prompts = newPrompts[categoryIndex].prompts.filter((p: ExamplePrompt) => p.prompt !== promptText);
-        // If category is now empty, remove it
-        if (newPrompts[categoryIndex].prompts.length === 0) {
-          newPrompts.splice(categoryIndex, 1);
-          if (selectedCategory === categoryTitle && newPrompts.length > 0) {
-            setSelectedCategory(newPrompts[0].title);
-          } else if (newPrompts.length === 0) {
-            setSelectedCategory('');
-          }
-        }
-      }
-      return newPrompts;
-    });
-  };
-  
-  const updatePrompt = (originalPromptText: string, categoryTitle: string, newPromptData: ExamplePrompt) => {
-    setExamplePrompts(prev => {
-      const newPrompts = JSON.parse(JSON.stringify(prev));
-      const categoryIndex = newPrompts.findIndex((c: PromptCategory) => c.title === categoryTitle);
-      if (categoryIndex > -1) {
-        const promptIndex = newPrompts[categoryIndex].prompts.findIndex((p: ExamplePrompt) => p.prompt === originalPromptText);
-        if (promptIndex > -1) {
-          newPrompts[categoryIndex].prompts[promptIndex] = newPromptData;
-        }
-      }
-      return newPrompts;
-    });
-    setEditingPrompt(null);
-  };
-
-  const handleGenerateExampleImage = async (promptToGenerate: string, categoryTitle: string) => {
-    if (!uploadedImage) {
-        setError('Please upload a base image first to generate an example image.');
+  const handleToggleChat = () => {
+    if (!session) {
+        setAuthModalView('sign_up');
         return;
     }
     
-    if (!spendCredits(EXAMPLE_GENERATION_COST)) return;
-
-    setGeneratingExample({ prompt: promptToGenerate, category: categoryTitle });
-    setError(null);
-
-    try {
-        const baseImagePart = await fileToGenerativePart(uploadedImage);
-        const imageUrls = await generateImage(promptToGenerate, baseImagePart, null);
-
-        if (imageUrls && imageUrls.length > 0) {
-            const newImageUrl = imageUrls[0];
-            setExamplePrompts(prev => {
-                const newPrompts = JSON.parse(JSON.stringify(prev));
-                const category = newPrompts.find((c: PromptCategory) => c.title === categoryTitle);
-                if (category) {
-                    const prompt = category.prompts.find((p: ExamplePrompt) => p.prompt === promptToGenerate);
-                    if (prompt) {
-                        prompt.imageUrl = newImageUrl;
-                    }
-                }
-                return newPrompts;
-            });
-            addToHistory(imageUrls);
-        } else {
-            throw new Error("Generation succeeded but no image was returned.");
-        }
-    } catch (e) {
-        console.error(e);
-        // Refund credits on failure
-        addCredits(EXAMPLE_GENERATION_COST);
-        const errorMessage = e instanceof Error ? e.message : 'An unexpected error occurred while generating the example.';
-        setError(errorMessage);
-        alert(errorMessage);
-    } finally {
-        setGeneratingExample(null);
-    }
-  };
-  
-  const handleGeneratePromptFromImage = useCallback(async (imageFile: File): Promise<string> => {
-    const imagePart = await fileToGenerativePart(imageFile);
-    return await generatePromptFromImage(imagePart);
-  }, []);
-  
-  const handleGenerateStylePrompt = async () => {
-    if (!styleImage) return;
-    setIsGeneratingStylePrompt(true);
-    setGeneratedStylePrompt('');
-    setStylePromptError(null);
-    try {
-      const result = await handleGeneratePromptFromImage(styleImage);
-      setGeneratedStylePrompt(result);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'An unknown error occurred.';
-      setStylePromptError(msg);
-    } finally {
-      setIsGeneratingStylePrompt(false);
-    }
-  };
-
-  const handleAppendStylePrompt = () => {
-    if (!generatedStylePrompt) return;
-    setPrompt(prev => {
-      const trimmedPrev = prev.trim();
-      if (trimmedPrev === '') {
-        return generatedStylePrompt;
-      }
-      if (/[.,;!?]$/.test(trimmedPrev)) {
-         return `${trimmedPrev} ${generatedStylePrompt}`;
-      }
-      return `${trimmedPrev}, ${generatedStylePrompt}`;
-    });
-    setGeneratedStylePrompt('');
-  };
-
-
-  const filteredPrompts = examplePrompts
-    .map(category => ({
-      ...category,
-      prompts: category.prompts.filter(p => p.prompt.toLowerCase().includes(promptSearch.toLowerCase()))
-    }))
-    .filter(category => category.prompts.length > 0);
-  
-  const displayedPrompts = showAllPrompts
-    ? filteredPrompts
-    : filteredPrompts.filter(c => c.title === selectedCategory);
+    setIsChatOpen(prev => !prev);
     
-  const bulkGenerationCost = examplePrompts.flatMap(cat => cat.prompts).length;
+    if (!chatSession) {
+        setChatSession(createChat());
+        if (chatMessages.length === 0) {
+            setChatMessages([{ role: 'model', text: "Hello! I'm your AI assistant. Ask me anything about the app or for prompt ideas!" }]);
+        }
+    }
+  };
+
+  const handleSendMessage = async (message: string) => {
+    if (!chatSession || !profile) return;
+    
+    const requiredCredits = 1;
+    if ((currentCredits ?? 0) < requiredCredits) {
+        setChatError("You don't have enough credits to chat.");
+        return;
+    }
+
+    setIsChatLoading(true);
+    setChatError(null);
+    setChatMessages(prev => [...prev, { role: 'user', text: message }]);
+    
+    try {
+        const response = await chatSession.sendMessage({ message });
+        setChatMessages(prev => [...prev, { role: 'model', text: response.text }]);
+        
+        const newCredits = profile.credits - requiredCredits;
+        const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', profile.id).select().single();
+        if (data) setProfile(p => p ? {...p, credits: data.credits} : null);
+        
+    } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+        setChatError(`Sorry, something went wrong: ${errorMessage}`);
+        setChatMessages(prev => [...prev, { role: 'model', text: `Sorry, I couldn't process that. Please try again.` }]);
+    } finally {
+        setIsChatLoading(false);
+    }
+  };
+
+  const handleAddPrompt = async (prompt: { text: string; imageFile: File | null }, categoryTitle: string) => {
+    try {
+        const updatedPrompts = await adminService.addPrompt(prompt, categoryTitle);
+        setExamplePrompts(updatedPrompts);
+    } catch (error) {
+        console.error("Failed to add prompt:", error);
+        setError("Could not save the new prompt.");
+    }
+  };
+
+  const handleUpdatePrompt = async (
+    promptId: string, 
+    updates: { text: string; categoryTitle: string; imageFile: File | null; removeImage: boolean },
+    originalImageUrl: string | null
+  ) => {
+    try {
+        const updatedPrompts = await adminService.updatePrompt(promptId, updates, originalImageUrl);
+        setExamplePrompts(updatedPrompts);
+    } catch (error) {
+        console.error("Failed to update prompt:", error);
+        setError("Could not update the prompt.");
+    }
+  };
+
+  const handleRemovePrompt = async (promptId: string) => {
+    try {
+        const updatedPrompts = await adminService.deletePrompt(promptId);
+        setExamplePrompts(updatedPrompts);
+    } catch (error) {
+        console.error("Failed to remove prompt:", error);
+        setError("Could not remove the prompt.");
+    }
+  };
+  
+  const handleAdminUpdateUser = async (userId: string, updates: Partial<UserProfile>) => {
+    const updatedUser = await adminService.updateUser(userId, updates);
+    setAllUsers(prevUsers => prevUsers.map(u => u.id === userId ? updatedUser : u));
+    if (profile?.id === userId) {
+        setProfile(p => p ? { ...p, ...updatedUser } : null);
+    }
+  };
+
+  const handleAdminDeleteUser = async (userId: string) => {
+    await adminService.deleteUser(userId);
+    setAllUsers(prevUsers => prevUsers.filter(u => u.id !== userId));
+  };
+  
+  const handleAdminUpdatePlan = async (planId: number, updates: Partial<Plan>) => {
+    const updatedPlan = await adminService.updatePlan(planId, updates);
+    setPlans(prevPlans => prevPlans.map(p => p.id === planId ? updatedPlan : p));
+  }
+
+  const handleAdminUpdatePaymentSettings = async (updates: Partial<PaymentSettings>) => {
+    const updatedSettings = await adminService.updatePaymentSettings(updates);
+    setPaymentSettings(updatedSettings);
+  };
+  
+  const handleAdminAddPlanCountryPrice = async (price: Omit<PlanCountryPrice, 'id'>) => {
+    const newPrice = await adminService.addPlanCountryPrice(price);
+    setPlanCountryPrices(prev => [...prev, newPrice]);
+  };
+    
+  const handleAdminUpdatePlanCountryPrice = async (priceId: number, updates: Partial<PlanCountryPrice>) => {
+    const updatedPrice = await adminService.updatePlanCountryPrice(priceId, updates);
+    setPlanCountryPrices(prev => prev.map(p => p.id === priceId ? updatedPrice : p));
+  };
+
+  const handleAdminDeletePlanCountryPrice = async (priceId: number) => {
+    await adminService.deletePlanCountryPrice(priceId);
+    setPlanCountryPrices(prev => prev.filter(p => p.id !== priceId));
+  };
+
+  const handlePlanSelection = (planName: string) => {
+    if (planName === 'pro') {
+      if (session) {
+        setIsMembershipModalOpen(true); // User is logged in, wants to upgrade
+      } else {
+        setAuthModalView('sign_up'); // Visitor wants pro, needs to sign up first
+      }
+    } else if (planName === 'free') {
+      if (!session) {
+        setAuthModalView('sign_up'); // Visitor wants free, needs to sign up
+      }
+    }
+  };
+
+  const handleSignUpClick = () => {
+    pricingTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const handleClearHistory = () => {
+    setHistoryImageUrls([]);
+  };
+
+  const isGenerating = generationState === GenerationState.LOADING || generationState === GenerationState.GENERATING_VIDEO;
+  const isQueued = generationState === GenerationState.QUEUED;
+  
+  const activeCategory = examplePrompts.find(cat => cat.title === selectedCategory) || examplePrompts[0];
+  const filteredPrompts = activeCategory?.prompts.filter(p => {
+    const text = p.text;
+    return text.toLowerCase().includes(promptSearch.toLowerCase())
+  }) || [];
+  const displayedPrompts = showAllPrompts ? filteredPrompts : filteredPrompts.slice(0, 6);
+  const totalFilteredPrompts = filteredPrompts.length;
+
+
+  const renderOutput = () => {
+    switch (generationState) {
+      case GenerationState.QUEUED:
+        const position = queue.indexOf(visitorId) + 1;
+        return (
+          <div className="flex flex-col items-center justify-center text-center p-4 animate-fade-in w-full max-w-md">
+            <div className="relative w-24 h-24 mb-4">
+              <UsersIcon className="absolute inset-0 w-full h-full text-brand opacity-25" />
+              <UsersIcon className="absolute inset-0 w-full h-full text-brand animate-pulse-slow" />
+            </div>
+            <h2 className="text-2xl font-bold text-text-primary">You're in the queue!</h2>
+            {position > 0 ? (
+                <p className="text-lg text-text-secondary mt-2">
+                    Your position: <span className="font-bold text-brand-secondary">{position}</span> of {queue.length}
+                </p>
+            ) : (
+                <p className="text-lg text-text-secondary mt-2">Getting ready to process...</p>
+            )}
+            <p className="text-sm text-text-secondary mt-1 max-w-xs">
+              To provide a fair service, generations for free users are processed one at a time.
+            </p>
+             <button
+                onClick={handleLeaveQueue}
+                className="mt-6 px-6 py-2 bg-red-600/20 text-red-400 border border-red-500/50 rounded-lg hover:bg-red-600/40 hover:text-red-300 transition-colors duration-200"
+             >
+                Leave Queue
+             </button>
+          </div>
+        );
+      case GenerationState.GENERATING_VIDEO:
+        return <LoadingIndicator messages={VIDEO_LOADING_MESSAGES} IconComponent={VideoCameraIcon} />;
+      case GenerationState.LOADING:
+        return <LoadingIndicator />;
+      case GenerationState.SUCCESS:
+        if (generatedVideoUrl) {
+            return <VideoPlayer videoUrl={generatedVideoUrl} />;
+        }
+        return generatedImageUrls && generatedImageUrls.length > 0 && <ImageDisplay imageUrls={generatedImageUrls} />;
+      case GenerationState.ERROR:
+        return (
+          <div className="flex flex-col items-center justify-center text-center text-red-400 bg-red-900/20 p-8 rounded-lg">
+            <h3 className="text-xl font-bold mb-2">Generation Failed</h3>
+            <p>{error}</p>
+          </div>
+        );
+      case GenerationState.IDLE:
+      default:
+        return (
+          <div className="flex flex-col items-center justify-center text-center text-text-secondary">
+            <div className="p-4 bg-panel-light rounded-full mb-4">
+              { generationMode === 'video' ? <VideoCameraIcon className="w-16 h-16 text-brand" /> : <PhotoIcon className="w-16 h-16 text-brand" /> }
+            </div>
+            <h2 className="text-2xl font-bold text-text-primary">{ generationMode === 'video' ? 'Ready to Create a Video?' : 'Ready to Transform Your Photo?' }</h2>
+            <p>{ generationMode === 'video' ? 'Describe the scene you want to bring to life.' : 'Upload a clear photo and describe the result you want.'}</p>
+          </div>
+        );
+    }
+  };
+
+  const renderGenerationButtonMessage = () => {
+    if (isQueued) return 'You are in line';
+    if (generationState === GenerationState.LOADING) return 'Generating Your Portrait...';
+    if (generationState === GenerationState.GENERATING_VIDEO) return 'Generating Your Video...';
+    if (generationMode === 'single' && !session && (isSystemBusy || queue.length > 0)) return `Join Queue (${queue.length} waiting)`;
+
+    if (generationMode === 'video') {
+        if ((currentCredits ?? 0) < VIDEO_CREDIT_COST) return 'Not Enough Credits';
+        return `Generate Video (${VIDEO_CREDIT_COST} Credits)`;
+    }
+    
+    if ((currentCredits ?? 0) < IMAGE_CREDIT_COST) return 'Out of Credits';
+    return `Generate Image (${IMAGE_CREDIT_COST} Credit)`;
+  };
+  
+  const renderCreditWarning = () => {
+    if ((currentCredits ?? 0) >= 1 || isGenerating || isQueued) return null;
+    const freePlan = plans.find(p => p.name === 'free');
+    const freeCredits = freePlan ? freePlan.credits_per_month : 80;
+
+    if (session && profile) {
+        return <p className="text-amber-400 text-sm text-center mt-3">You're out of credits. Your credits will renew monthly.</p>;
+    } else {
+        return (
+            <p className="text-amber-400 text-sm text-center mt-3">
+                You've used your daily credits. <button onClick={() => setAuthModalView('sign_up')} className="font-bold underline hover:text-amber-300">Sign Up</button> to get {freeCredits} free credits!
+            </p>
+        );
+    }
+  };
+
+  const proPlan = plans.find(p => p.name === 'pro');
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100 font-sans p-4 sm:p-6 lg:p-8">
-        {showAdminPanel && (
-            <AdminPanel
-                prompts={examplePrompts}
-                onAddPrompt={addPrompt}
-                onRemovePrompt={removePrompt}
-                onClose={() => setShowAdminPanel(false)}
-                onGenerateExampleImage={handleGenerateExampleImage}
-                generatingExample={generatingExample}
-                hasBaseImage={!!uploadedImage}
-                editingPrompt={editingPrompt}
-                onStartEdit={setEditingPrompt}
-                onCancelEdit={() => setEditingPrompt(null)}
-                onUpdatePrompt={updatePrompt}
-                onGeneratePromptFromImage={handleGeneratePromptFromImage}
-                credits={credits}
-            />
-        )}
-      <main className="max-w-7xl mx-auto">
-        <header className="text-center mb-10">
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-brand-primary via-purple-400 to-brand-secondary">
-            BesiAi Portrait Generator
-          </h1>
-          <p className="mt-4 text-lg text-gray-300 max-w-2xl mx-auto">
-            Transform your photos into professional headshots or epic sci-fi portraits. Upload a reference image and describe your desired style.
-          </p>
-        </header>
+    <div className="min-h-screen bg-background text-text-primary font-sans">
+      {authModalView && (
+        <Auth 
+            initialView={authModalView}
+            onClose={() => setAuthModalView(null)}
+        />
+      )}
+      {isContactModalOpen && (
+        <ContactModal 
+            onClose={() => setIsContactModalOpen(false)}
+            session={session}
+            profile={profile}
+        />
+      )}
+      {isAdminPanelOpen && profile?.role === 'admin' && (
+        <AdminPanel
+          allUsers={allUsers}
+          plans={plans}
+          prompts={examplePrompts}
+          paymentSettings={paymentSettings}
+          planCountryPrices={planCountryPrices}
+          onAddPrompt={handleAddPrompt}
+          onRemovePrompt={handleRemovePrompt}
+          onUpdatePrompt={handleUpdatePrompt}
+          onUpdateUser={handleAdminUpdateUser}
+          onDeleteUser={handleAdminDeleteUser}
+          onUpdatePlan={handleAdminUpdatePlan}
+          onUpdatePaymentSettings={handleAdminUpdatePaymentSettings}
+          onAddPlanCountryPrice={handleAdminAddPlanCountryPrice}
+          onUpdatePlanCountryPrice={handleAdminUpdatePlanCountryPrice}
+          onDeletePlanCountryPrice={handleAdminDeletePlanCountryPrice}
+          onClose={() => setIsAdminPanelOpen(false)}
+        />
+      )}
+      {isMembershipModalOpen && proPlan && (
+        <MembershipModal
+            plan={proPlan}
+            onClose={() => setIsMembershipModalOpen(false)}
+            onUpgrade={handleUpgradeToPro}
+            country={profile?.country}
+            paymentSettings={paymentSettings}
+            profile={profile}
+        />
+      )}
+      <main className="container mx-auto p-4 sm:p-6 md:p-8">
+        <Header
+          session={session}
+          profile={profile}
+          visitorProfile={visitorProfile}
+          proPlan={proPlan}
+          onSignUpClick={handleSignUpClick}
+          onLoginClick={() => setAuthModalView('sign_in')}
+          onUpgradeClick={() => setIsMembershipModalOpen(true)}
+          onAdminPanelClick={() => setIsAdminPanelOpen(prev => !prev)}
+        />
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Left Panel: Inputs */}
-          <div className="lg:col-span-3 space-y-6">
-            <div className="bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-700">
-              <h3 className="font-semibold mb-3 text-lg">1. Upload Base Image</h3>
-              <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={generationState === GenerationState.LOADING || isBulkGenerating} onError={setError} />
-            </div>
-            
-             <div className="bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-700">
-              <h3 className="font-semibold mb-3 text-lg">2. (Optional) Style Reference</h3>
-               <p className="text-xs text-gray-400 mb-3">Upload an image to influence artistic style, or generate a prompt from it.</p>
-              <ImageUploader onImageChange={handleStyleImageChange} imageDataUrl={styleImageDataUrl} disabled={generationState === GenerationState.LOADING || isBulkGenerating} onError={setError} />
-               <button 
-                onClick={handleGenerateStylePrompt} 
-                disabled={!styleImage || isGeneratingStylePrompt} 
-                className="mt-4 w-full flex items-center justify-center py-2 px-4 bg-purple-600 text-white font-semibold rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
-              >
-                <SparklesIcon className="w-5 h-5 mr-2" />
-                {isGeneratingStylePrompt ? 'Generating...' : 'Generate Style Prompt'}
-              </button>
-              {stylePromptError && <p className="mt-2 text-sm text-red-400">{stylePromptError}</p>}
-              {generatedStylePrompt && (
-                <div className="mt-4 animate-fade-in">
-                  <label className="block text-sm font-medium text-gray-300 mb-1">Generated Style:</label>
-                  <textarea value={generatedStylePrompt} readOnly className="w-full h-24 p-2 bg-gray-900 border border-gray-600 rounded-lg resize-none"></textarea>
-                  <button 
-                    onClick={handleAppendStylePrompt} 
-                    className="mt-2 w-full flex items-center justify-center text-sm py-2 px-3 bg-gray-600 text-white font-semibold rounded-lg hover:bg-gray-500 transition-colors"
-                  >
-                    <ClipboardIcon className="w-4 h-4 mr-2"/>
-                    Append to Main Prompt
-                  </button>
-                </div>
-              )}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Controls Panel */}
+          <div className="bg-panel p-6 rounded-2xl border border-border flex flex-col">
+             <div className="flex border-b border-border mb-6">
+                <button
+                    onClick={() => handleModeChange('single')}
+                    className={`px-6 py-3 text-sm font-semibold transition-colors duration-200 border-b-2 ${
+                    generationMode === 'single'
+                        ? 'border-brand text-brand'
+                        : 'border-transparent text-text-secondary hover:text-text-primary'
+                    }`}
+                >
+                    Single Person
+                </button>
+                <button
+                    onClick={() => handleModeChange('multi')}
+                    className={`px-6 py-3 text-sm font-semibold transition-colors duration-200 border-b-2 ${
+                    generationMode === 'multi'
+                        ? 'border-brand text-brand'
+                        : 'border-transparent text-text-secondary hover:text-text-primary'
+                    }`}
+                >
+                    Multi-person
+                </button>
+                {profile?.role === 'admin' && (
+                    <button
+                        onClick={() => handleModeChange('video')}
+                        className={`px-6 py-3 text-sm font-semibold transition-colors duration-200 border-b-2 ${
+                        generationMode === 'video'
+                            ? 'border-brand text-brand'
+                            : 'border-transparent text-text-secondary hover:text-text-primary'
+                        }`}
+                    >
+                        Video
+                    </button>
+                )}
             </div>
 
-            <div className="bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-700">
-              <h3 className="font-semibold mb-3 text-lg">3. Describe Your Vision</h3>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="e.g., A professional corporate headshot..."
-                className="w-full h-32 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition duration-200 resize-none disabled:opacity-50"
-                disabled={generationState === GenerationState.LOADING || isBulkGenerating}
-              />
-            </div>
-            
-            {error && generationState === GenerationState.IDLE && (
-              <div className="animate-fade-in p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm text-center" role="alert">
-                {error}
+            <div className="flex-grow space-y-8">
+              {/* Step 1 */}
+              <div className="flex flex-col space-y-3">
+                 <div className="flex items-center gap-3">
+                   <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">1</div>
+                   <h2 className="text-xl font-bold text-text-primary">
+                    {generationMode === 'multi' ? 'Upload First Person' : (generationMode === 'video' ? 'Upload Reference Photo (Optional)' : 'Upload Base Photo')}
+                   </h2>
+                 </div>
+                <ImageUploader 
+                  onImageChange={handleImageChange}
+                  imageDataUrl={imageDataUrl}
+                  disabled={isGenerating || isQueued}
+                />
               </div>
-            )}
 
-            <div className="bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-700 space-y-3">
-               <div className="flex justify-between items-center">
-                   <h3 className="font-semibold text-lg">Credits</h3>
-                   <div className="flex items-center gap-2 px-3 py-1 bg-gray-900 rounded-full text-yellow-400">
-                      <CreditIcon className="w-5 h-5"/>
-                      <span className="font-bold text-lg">{credits}</span>
-                   </div>
-               </div>
-               <button onClick={() => addCredits(ADD_CREDITS_AMOUNT)} className="w-full py-2 text-sm bg-green-600/20 text-green-300 border border-green-500/50 rounded-lg hover:bg-green-600/40 hover:text-green-200 transition-colors duration-200">
-                   Add {ADD_CREDITS_AMOUNT} Credits
-               </button>
-            </div>
-
-            <button
-              onClick={handleGenerateClick}
-              disabled={!prompt || !uploadedImage || generationState === GenerationState.LOADING || isBulkGenerating || credits < GENERATION_COST}
-              className="w-full flex items-center justify-center py-3 px-6 bg-gradient-to-r from-brand-primary to-brand-secondary text-white font-bold text-lg rounded-lg shadow-lg hover:shadow-xl transform hover:-translate-y-1 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-              title={credits < GENERATION_COST ? `Not enough credits. Needs ${GENERATION_COST}.` : ''}
-            >
-              <SparklesIcon className="w-6 h-6 mr-2" />
-              {generationState === GenerationState.LOADING ? 'Generating...' : `Generate Image (${GENERATION_COST} Credit)`}
-            </button>
-          </div>
-
-          {/* Center Panel: Output */}
-          <div className="lg:col-span-5 flex items-center justify-center bg-gray-800/50 border-2 border-dashed border-gray-700 rounded-xl min-h-[30rem] p-4">
-              {isBulkGenerating ? (
-                  <div className="flex flex-col items-center text-center">
-                    <LoadingIndicator />
-                    <p className="mt-4 text-xl">Generating {bulkGenerationProgress.total} images...</p>
-                    <p className="text-gray-400">({bulkGenerationProgress.current} / {bulkGenerationProgress.total})</p>
-                    <div className="w-full bg-gray-700 rounded-full h-2.5 mt-4">
-                        <div className="bg-brand-primary h-2.5 rounded-full" style={{ width: `${(bulkGenerationProgress.current / bulkGenerationProgress.total) * 100}%` }}></div>
+              {generationMode === 'multi' && (
+                <div className="flex flex-col space-y-3 animate-fade-in">
+                    <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">2</div>
+                    <h2 className="text-xl font-bold text-text-primary">Upload Second Person</h2>
                     </div>
-                     <p className="text-xs text-gray-500 mt-4">This may take several minutes. Please don't close this tab. A ZIP file will download when complete.</p>
-                  </div>
-              ) : bulkGeneratedImages.length > 0 ? (
-                  <BulkImageDisplay images={bulkGeneratedImages} />
-              ) : generationState === GenerationState.LOADING ? (
-                <LoadingIndicator />
-              ) : generationState === GenerationState.SUCCESS && generatedImageUrls ? (
-                <ImageDisplay imageUrls={generatedImageUrls} />
-              ) : generationState === GenerationState.ERROR && error ? (
-                <div className="text-center text-red-400 p-4 bg-red-900/20 rounded-lg" role="alert">
-                  <h3 className="font-bold">Generation Failed</h3>
-                  <p className="text-sm mt-1">{error}</p>
-                </div>
-              ) : (
-                <div className="text-center text-gray-500">
-                  <SparklesIcon className="w-16 h-16 mx-auto mb-4" />
-                  <p className="font-semibold">Your generated portrait will appear here</p>
+                    <ImageUploader 
+                    onImageChange={handleImageTwoChange}
+                    imageDataUrl={imageDataUrlTwo}
+                    disabled={isGenerating || isQueued}
+                    />
                 </div>
               )}
-          </div>
 
-          {/* Right Panel: Examples */}
-          <div className="lg:col-span-4">
-            <div className="bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-700 h-full">
-              <h3 className="font-semibold mb-3 text-lg">Inspiration Gallery</h3>
-              <input 
-                type="text"
-                placeholder="Search prompts..."
-                value={promptSearch}
-                onChange={(e) => setPromptSearch(e.target.value)}
-                className="w-full p-2 mb-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary"
-              />
-              <div className="flex flex-wrap gap-2 mb-4">
-                  <button onClick={() => setShowAllPrompts(!showAllPrompts)} className={`px-3 py-1 text-sm rounded-full transition-colors ${showAllPrompts ? 'bg-brand-primary text-white' : 'bg-gray-700 hover:bg-gray-600'}`}>All</button>
-                  {examplePrompts.map(cat => (
-                     <button key={cat.title} onClick={() => { setSelectedCategory(cat.title); setShowAllPrompts(false);}} className={`px-3 py-1 text-sm rounded-full transition-colors ${!showAllPrompts && selectedCategory === cat.title ? 'bg-brand-primary text-white' : 'bg-gray-700 hover:bg-gray-600'}`}>{cat.title}</button>
-                  ))}
-              </div>
-              <div className="space-y-4 max-h-[calc(100vh-25rem)] overflow-y-auto pr-2">
-                {displayedPrompts.map(category => (
-                  <div key={category.title}>
-                    {showAllPrompts && <h4 className="font-bold text-brand-secondary mb-2">{category.title}</h4>}
-                    <div className="grid grid-cols-2 gap-2">
-                      {category.prompts.map(ex => (
-                        <div key={ex.prompt} className="group relative cursor-pointer aspect-square" onClick={() => useExamplePrompt(ex)}>
-                           <img src={ex.imageUrl} alt={ex.prompt.substring(0,30)} className="w-full h-full object-cover rounded-lg group-hover:opacity-40 transition-opacity" />
-                           <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent p-2 flex items-end opacity-0 group-hover:opacity-100 transition-opacity">
-                               <p className="text-white text-xs font-semibold leading-tight">{ex.prompt}</p>
-                           </div>
+              {/* Get Prompt from Image (Single Person Only) */}
+              {generationMode === 'single' && (
+                <div className="flex flex-col space-y-3">
+                    <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">2</div>
+                    <h2 className="text-xl font-bold text-text-primary">Get Prompt from Image <span className="text-sm text-text-secondary">(Optional)</span></h2>
+                    </div>
+                    <div className="ml-11">
+                    <p className="text-sm text-text-secondary -mt-2">Let AI describe an image to generate a new prompt.</p>
+                    <div className="flex flex-col gap-4 mt-3">
+                        <ImageUploader 
+                            onImageChange={handlePromptGenImageChange}
+                            imageDataUrl={promptGenImageDataUrl}
+                            disabled={isGenerating || isQueued || isGeneratingPrompt}
+                        />
+                        <div className="space-y-3 p-3 bg-background rounded-lg border border-border">
+                            <p className="text-sm font-semibold text-text-secondary">Advanced Options</p>
+                            <div>
+                                <label className="text-xs text-text-secondary font-medium">Describe these elements:</label>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-1">
+                                    {Object.keys(promptFocus).map((key) => {
+                                        const focusKey = key as keyof typeof promptFocus;
+                                        const label = { realism: 'Realism & Detail', style: 'Style & Mood', background: 'Background & Setting', clothing: 'Clothing & Attire', lighting: 'Lighting Details' }[focusKey];
+                                        return (
+                                            <div key={key} className="flex items-center gap-2">
+                                                <input
+                                                    type="checkbox"
+                                                    id={`focus-${key}`}
+                                                    checked={promptFocus[focusKey]}
+                                                    onChange={(e) => setPromptFocus(prev => ({...prev, [key]: e.target.checked }))}
+                                                    className="w-4 h-4 bg-background border-border rounded text-brand focus:ring-brand focus:ring-2 disabled:opacity-50"
+                                                    disabled={isGenerating || isQueued || isGeneratingPrompt}
+                                                />
+                                                <label htmlFor={`focus-${key}`} className="text-sm text-text-secondary select-none cursor-pointer">{label}</label>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                            <div>
+                                <label htmlFor="keywords" className="text-xs text-text-secondary font-medium">Incorporate Keywords (optional):</label>
+                                <input
+                                    id="keywords"
+                                    type="text"
+                                    value={promptKeywords}
+                                    onChange={(e) => setPromptKeywords(e.target.value)}
+                                    placeholder="e.g., cinematic, realism, real life"
+                                    className="w-full mt-1 p-2 bg-panel-light border border-border rounded-lg focus:ring-1 focus:ring-brand text-sm"
+                                    disabled={isGenerating || isQueued || isGeneratingPrompt}
+                                />
+                            </div>
                         </div>
-                      ))}
+                        <button
+                            onClick={handleGeneratePromptFromImage}
+                            disabled={isGenerating || isQueued || isGeneratingPrompt || !promptGenImage || (currentCredits ?? 0) < IMAGE_CREDIT_COST}
+                            className="w-full flex items-center justify-center py-3 px-4 bg-panel-light text-text-primary font-semibold rounded-lg shadow-md hover:bg-border transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <PhotoIcon className="w-5 h-5 mr-2" />
+                            {isGeneratingPrompt ? `Analyzing... (${IMAGE_CREDIT_COST} Credit)` : `Generate Prompt (${IMAGE_CREDIT_COST} Credit)`}
+                        </button>
                     </div>
-                  </div>
-                ))}
-                {displayedPrompts.length === 0 && <p className="text-gray-500 text-center py-8">No prompts found.</p>}
+                    </div>
+                </div>
+               )}
+
+              {/* Prompt Text Area */}
+              <div className="flex flex-col space-y-3">
+                <div className="flex items-center gap-3">
+                   <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">{generationMode === 'multi' ? '3' : '2'}</div>
+                   <h2 className="text-xl font-bold text-text-primary">{generationMode === 'video' ? 'Describe the Video' : 'Describe the Transformation'}</h2>
+                 </div>
+                <textarea
+                  id="prompt"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder={generationMode === 'video' ? "e.g., A neon hologram of a cat driving at top speed" : "e.g., A professional corporate headshot, wearing a dark suit..."}
+                  className="w-full h-36 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand focus:border-brand transition duration-200 resize-none placeholder-text-secondary"
+                  disabled={isGenerating || isQueued}
+                />
               </div>
+               
+               {/* Examples Section */}
+               <div className="flex flex-col space-y-4">
+                <p className="text-md font-semibold text-text-secondary">Or try an example:</p>
+                
+                <div className="mb-1">
+                  <input
+                    type="text"
+                    value={promptSearch}
+                    onChange={(e) => setPromptSearch(e.target.value)}
+                    placeholder="Search examples..."
+                    className="w-full p-2 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand focus:border-brand transition duration-200 placeholder-text-secondary"
+                    disabled={isGenerating || isQueued || promptsLoading || examplePrompts.length === 0}
+                  />
+                </div>
+
+                {promptsLoading ? (
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-3 gap-2 pb-3 border-b border-border">
+                            <div className="h-9 bg-panel-light rounded-lg animate-pulse"></div>
+                            <div className="h-9 bg-panel-light rounded-lg animate-pulse"></div>
+                            <div className="h-9 bg-panel-light rounded-lg animate-pulse"></div>
+                        </div>
+                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                            {Array.from({ length: 4 }).map((_, i) => (
+                                <div key={i} className="aspect-square bg-panel-light rounded-lg animate-pulse"></div>
+                            ))}
+                        </div>
+                    </div>
+                ) : examplePrompts.length > 0 ? (
+                    <>
+                        <div className="grid grid-cols-3 gap-2 pb-3 border-b border-border">
+                        {examplePrompts.map((category) => (
+                            <button
+                            key={category.id}
+                            onClick={() => handleCategoryClick(category.title)}
+                            disabled={isGenerating || isQueued}
+                            className={`flex items-center justify-center text-center p-2 rounded-lg border text-xs font-medium transition-colors duration-200 disabled:opacity-50 ${
+                                selectedCategory === category.title
+                                ? 'bg-brand/10 border-brand text-brand'
+                                : 'bg-panel-light border-border text-text-secondary hover:border-brand/50 hover:text-text-primary'
+                            }`}
+                            >
+                            {category.title}
+                            </button>
+                        ))}
+                        </div>
+
+                        {filteredPrompts.length > 0 ? (
+                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                            {displayedPrompts.map((p) => {
+                            const { text, imageUrl } = p;
+
+                            return (
+                                <button
+                                    key={p.id}
+                                    onClick={() => handleExampleClick(p)}
+                                    disabled={isGenerating || isQueued}
+                                    className="group aspect-square bg-panel-light rounded-lg overflow-hidden text-left focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-panel focus:ring-brand disabled:opacity-50 transition-all duration-200 hover:scale-[1.03] disabled:transform-none"
+                                    title={text}
+                                >
+                                {imageUrl ? (
+                                    <div className="relative w-full h-full">
+                                    <img src={imageUrl} alt={text} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
+                                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
+                                    <p className="absolute bottom-0 left-0 right-0 p-2 text-xs text-white font-medium leading-tight">
+                                        {text.length > 60 ? text.substring(0, 60) + '...' : text}
+                                    </p>
+                                    </div>
+                                ) : (
+                                    <div className="p-2 flex items-center justify-center h-full bg-background group-hover:bg-border transition-colors duration-200">
+                                    <p className="text-xs text-text-secondary font-medium text-center">
+                                        {text.length > 90 ? text.substring(0, 90) + '...' : text}
+                                    </p>
+                                    </div>
+                                )}
+                                </button>
+                            )
+                            })}
+                        </div>
+                        ) : (
+                        <p className="text-text-secondary text-sm px-2">No examples match your search.</p>
+                        )}
+
+                        {totalFilteredPrompts > 6 && (
+                        <button
+                            onClick={() => setShowAllPrompts(!showAllPrompts)}
+                            className="text-sm text-brand hover:underline mt-2"
+                        >
+                            {showAllPrompts ? 'Show Less' : `Show More (${totalFilteredPrompts - 6} more)`}
+                        </button>
+                        )}
+                    </>
+                ) : (
+                    <p className="text-text-secondary text-sm px-2 text-center py-4">No examples currently available.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="pt-6 mt-auto border-t border-border">
+               {generationMode === 'single' && !session && (isSystemBusy || queue.length > 0) && !isQueued && (
+                <div className="flex items-center justify-center gap-2 text-sm text-brand-secondary mb-3 animate-fade-in">
+                    <UsersIcon className="w-5 h-5 animate-pulse" />
+                    <span>System is busy. Join the queue to generate.</span>
+                </div>
+              )}
+              {/* Generation Controls */}
+              {generationMode !== 'video' && (
+                <>
+                <div className="mb-4">
+                    <label className="text-sm font-semibold text-text-secondary mb-2 block text-center">Image Size</label>
+                    <div className="flex bg-background rounded-lg p-1 border border-border w-full max-w-xs mx-auto">
+                        <button
+                            onClick={() => setImageSize('1024')}
+                            disabled={isGenerating || isQueued}
+                            className={`w-1/2 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-50 ${imageSize === '1024' ? 'bg-panel-light text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}
+                        >
+                            Standard <span className="text-xs text-text-tertiary">(1024px)</span>
+                        </button>
+                        <button
+                            onClick={() => {
+                                if (profile?.plan === 'pro') {
+                                    setImageSize('2048');
+                                } else {
+                                    if (session) {
+                                        setIsMembershipModalOpen(true);
+                                    } else {
+                                        setAuthModalView('sign_up');
+                                    }
+                                }
+                            }}
+                            disabled={isGenerating || isQueued}
+                            className={`w-1/2 py-2 text-sm font-semibold rounded-md transition-colors relative flex items-center justify-center gap-1.5 disabled:opacity-50 ${imageSize === '2048' && profile?.plan === 'pro' ? 'bg-brand-secondary text-background shadow' : 'text-text-secondary hover:bg-border'} ${profile?.plan !== 'pro' ? 'cursor-pointer' : ''}`}
+                            title={profile?.plan !== 'pro' ? 'Upgrade to Pro for HD Images' : 'Select HD Image Size'}
+                        >
+                            HD <span className="text-xs text-text-tertiary">(2048px)</span>
+                            {profile?.plan !== 'pro' && (
+                                <span className="absolute -top-2 -right-2 flex items-center gap-1 px-1.5 py-0.5 bg-brand-secondary text-background font-bold rounded-full text-[10px] leading-none">
+                                    <StarIcon className="w-2.5 h-2.5" />
+                                    PRO
+                                </span>
+                            )}
+                        </button>
+                    </div>
+                </div>
+                <div className="mb-4">
+                    <label id="aspect-ratio-label" className="text-sm font-semibold text-text-secondary mb-2 block text-center">Aspect Ratio</label>
+                    <div role="group" aria-labelledby="aspect-ratio-label" className="grid grid-cols-5 gap-1 bg-background rounded-lg p-1 border border-border w-full max-w-xs mx-auto">
+                        {(['1:1', '16:9', '9:16', '4:3', '3:4'] as const).map(ratio => {
+                            const isProFeature = ratio !== '1:1';
+                            const canUseFeature = profile?.plan === 'pro' || !isProFeature;
+
+                            return (
+                            <button
+                                key={ratio}
+                                onClick={() => {
+                                    if (canUseFeature) {
+                                        setAspectRatio(ratio);
+                                    } else {
+                                        if (session) {
+                                            setIsMembershipModalOpen(true);
+                                        } else {
+                                            setAuthModalView('sign_up');
+                                        }
+                                    }
+                                }}
+                                disabled={isGenerating || isQueued}
+                                className={`relative w-full py-2 text-xs font-semibold rounded-md transition-colors disabled:opacity-50 ${aspectRatio === ratio && canUseFeature ? 'bg-panel-light text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}
+                                aria-pressed={aspectRatio === ratio && canUseFeature}
+                                title={!canUseFeature ? 'Upgrade to Pro for different aspect ratios' : `Set aspect ratio to ${ratio}`}
+                            >
+                                {ratio}
+                                {!canUseFeature && (
+                                    <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center p-0.5 bg-brand-secondary text-background font-bold rounded-full text-[9px] leading-none">
+                                        <StarIcon className="w-2.5 h-2.5" />
+                                    </span>
+                                )}
+                            </button>
+                            );
+                        })}
+                    </div>
+                </div>
+                </>
+              )}
+              <button
+                onClick={generationMode === 'video' ? handleGenerateVideo : (generationMode === 'multi' ? handleGenerateMultiPersonImage : handleGenerateImage)}
+                disabled={isGenerating || isQueued || 
+                    (generationMode === 'video' && (!prompt.trim() || (currentCredits ?? 0) < VIDEO_CREDIT_COST || !session)) ||
+                    (generationMode === 'single' && (!prompt.trim() || !imageDataUrl || (currentCredits ?? 0) < IMAGE_CREDIT_COST)) ||
+                    (generationMode === 'multi' && (!prompt.trim() || !imageDataUrl || !imageDataUrlTwo || (currentCredits ?? 0) < IMAGE_CREDIT_COST))
+                }
+                className="w-full flex items-center justify-center py-4 px-6 bg-brand text-white font-bold rounded-lg shadow-lg hover:bg-brand-hover transform hover:-translate-y-0.5 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
+              >
+                <SparklesIcon className="w-6 h-6 mr-2" />
+                {renderGenerationButtonMessage()}
+              </button>
+              {renderCreditWarning()}
+              {error && generationState !== GenerationState.LOADING && generationState !== GenerationState.QUEUED && <p className="text-red-400 text-sm text-center mt-4">{error}</p>}
+            </div>
+          </div>
+
+          {/* Output Panel */}
+          <div className="bg-panel p-6 rounded-2xl border border-border flex items-center justify-center min-h-[400px] lg:min-h-0">
+            <div className="w-full h-full flex items-center justify-center">
+              {renderOutput()}
             </div>
           </div>
         </div>
 
-        {history.length > 0 && <HistoryDisplay imageUrls={history} onClear={clearHistory} />}
+        {plans.length > 0 && (
+          <PricingTable 
+            ref={pricingTableRef}
+            plans={plans}
+            session={session}
+            profile={profile}
+            onSelectPlan={handlePlanSelection}
+            country={profile?.country}
+            planCountryPrices={planCountryPrices}
+          />
+        )}
+        
+        {historyImageUrls.length > 0 && (
+          <HistoryDisplay
+            imageUrls={historyImageUrls}
+            onClear={handleClearHistory}
+          />
+        )}
 
-         <footer className="text-center mt-12 pt-8 border-t border-gray-700/50">
-           <div className="flex justify-center items-center gap-4">
-             <button
-              onClick={handleBulkGenerate}
-              disabled={!uploadedImage || isBulkGenerating || generationState === GenerationState.LOADING || credits < bulkGenerationCost}
-              className="px-4 py-2 bg-green-600/20 text-green-300 border border-green-500/50 rounded-lg hover:bg-green-600/40 hover:text-green-200 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              title={credits < bulkGenerationCost ? `Not enough credits. Needs ${bulkGenerationCost}.` : ''}
-            >
-              {`Generate & Download All (${bulkGenerationCost} Credits)`}
-            </button>
-            <button
-                onClick={() => setShowAdminPanel(true)}
-                className="px-4 py-2 bg-gray-600/20 text-gray-300 border border-gray-500/50 rounded-lg hover:bg-gray-600/40 hover:text-gray-200 transition-colors duration-200"
-            >
-                Admin Panel
-            </button>
-           </div>
-          <p className="text-gray-500 text-sm mt-4">&copy; {new Date().getFullYear()} BesiAi. All rights reserved.</p>
-        </footer>
-
+        <Footer onContactClick={() => setIsContactModalOpen(true)} />
       </main>
+      
+      {isChatOpen && profile && (
+        <ChatBox
+            messages={chatMessages}
+            isLoading={isChatLoading}
+            error={chatError}
+            profile={profile}
+            onClose={() => setIsChatOpen(false)}
+            onSendMessage={handleSendMessage}
+        />
+      )}
+      
+      <button
+        onClick={handleToggleChat}
+        className="fixed bottom-6 right-6 bg-brand text-white p-4 rounded-full shadow-lg hover:bg-brand-hover transition-transform transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background focus:ring-brand"
+        aria-label="Open AI Assistant"
+        title="AI Assistant"
+      >
+        <ChatBubbleLeftRightIcon className="w-7 h-7" />
+      </button>
+
     </div>
   );
 };
