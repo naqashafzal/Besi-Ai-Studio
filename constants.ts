@@ -1,4 +1,5 @@
 
+
 import { Plan } from './types';
 
 export const LOADING_MESSAGES: string[] = [
@@ -21,7 +22,7 @@ export const VIDEO_LOADING_MESSAGES: string[] = [
 
 export const DEFAULT_PLANS: Plan[] = [
   { id: 1, name: 'free', price: 0, credits_per_month: 80 },
-  { id: 2, name: 'pro', price: 10, credits_per_month: 1000 },
+  { id: 2, name: 'pro', price: 10, credits_per_month: 1300 },
 ];
 
 export const countryList = [

@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { UserProfile, Plan, PaymentSettings, PlanCountryPrice, PromptCategory, ContactFormData, Prompt } from '../types';
+import { UserProfile, Plan, PaymentSettings, PlanCountryPrice, PromptCategory, ContactFormData, Prompt, AppSettings, Coupon } from '../types';
 
 /**
  * Fetches all user profiles from the database.
@@ -179,6 +179,89 @@ export const deletePlanCountryPrice = async (priceId: number): Promise<void> => 
     }
 };
 
+// --- App Settings ---
+export const getAppSettings = async (): Promise<AppSettings | null> => {
+    const { data, error } = await supabase
+        .from('app_settings')
+        .select('*')
+        .eq('id', 1) // Always get the single settings row
+        .single();
+
+    if (error) {
+        console.error("Error fetching app settings:", error);
+        if (error.code === 'PGRST116') return null; // Not found is ok, will be created on first update
+        throw error;
+    }
+    return data;
+};
+
+export const updateAppSettings = async (updates: Partial<Omit<AppSettings, 'id'>>): Promise<AppSettings> => {
+    const settingsData = { id: 1, ...updates };
+    const { data, error } = await supabase
+        .from('app_settings')
+        .upsert(settingsData)
+        .select()
+        .single();
+
+    if (error) {
+        console.error("Error updating app settings:", error);
+        throw error;
+    }
+    return data;
+};
+
+// --- Coupon Management ---
+export const getCoupons = async (): Promise<Coupon[]> => {
+    const { data, error } = await supabase.from('coupons').select('*').order('created_at', { ascending: false });
+    if (error) {
+        console.error("Error fetching coupons:", error);
+        throw error;
+    }
+    return data || [];
+};
+
+export const addCoupon = async (couponData: Omit<Coupon, 'id' | 'times_used' | 'created_at'>): Promise<Coupon> => {
+    const { data, error } = await supabase.from('coupons').insert([couponData]).select().single();
+    if (error) {
+        console.error("Error adding coupon:", error);
+        throw error;
+    }
+    return data;
+};
+
+export const updateCoupon = async (couponId: number, updates: Partial<Coupon>): Promise<Coupon> => {
+    const { data, error } = await supabase.from('coupons').update(updates).eq('id', couponId).select().single();
+    if (error) {
+        console.error("Error updating coupon:", error);
+        throw error;
+    }
+    return data;
+};
+
+export const deleteCoupon = async (couponId: number): Promise<void> => {
+    const { error } = await supabase.from('coupons').delete().eq('id', couponId);
+    if (error) {
+        console.error("Error deleting coupon:", error);
+        throw error;
+    }
+};
+
+// --- Public Coupon Validation ---
+export const validateCoupon = async (code: string, planId: number): Promise<{ isValid: boolean; discountValue?: number; discountType?: 'percentage' | 'fixed_amount'; message: string }> => {
+    const { data, error } = await supabase.rpc('validate_coupon', {
+        coupon_code: code,
+        plan_id_to_check: planId
+    });
+
+    if (error) {
+        console.error("Error validating coupon:", error);
+        return { isValid: false, message: "Could not validate coupon. Please try again." };
+    }
+    
+    return data;
+};
+
+
 // --- Prompt Management ---
 
 /**
@@ -200,53 +283,36 @@ const fileToDataUrl = (file: File): Promise<string> => {
  * against potential database relation or RLS issues with complex queries.
  */
 export const getPrompts = async (): Promise<PromptCategory[]> => {
-    // Step 1: Fetch all categories
-    const { data: categories, error: categoriesError } = await supabase
+    // This single query is much faster. It joins categories with their prompts
+    // in the database and only fetches categories that have at least one prompt.
+    
+    const { data, error } = await supabase
         .from('prompt_categories')
-        .select('id, title')
+        .select('id, title, example_prompts!inner(id, prompt, image_url)') // <-- FIX 1: Select 'prompt'
         .order('title');
 
-    if (categoriesError) {
-        console.error("Error fetching prompt categories:", categoriesError);
-        throw categoriesError;
+    if (error) {
+        console.error("Error fetching prompts with join:", error);
+        throw error;
     }
-    if (!categories || categories.length === 0) {
+
+    if (!data) {
         return [];
     }
 
-    // Step 2: Fetch all prompts that belong to these categories
-    const categoryIds = categories.map(c => c.id);
-    const { data: prompts, error: promptsError } = await supabase
-        .from('example_prompts')
-        .select('id, text, image_url, category_id')
-        .in('category_id', categoryIds);
-    
-    if (promptsError) {
-        console.error("Error fetching example prompts:", promptsError);
-        throw promptsError;
-    }
-    
-    // Step 3: Map prompts to their categories
-    const promptsByCategoryId = new Map<string, Prompt[]>();
-    if (prompts) {
-        for (const prompt of prompts) {
-            if (!promptsByCategoryId.has(prompt.category_id)) {
-                promptsByCategoryId.set(prompt.category_id, []);
-            }
-            promptsByCategoryId.get(prompt.category_id)!.push({
-                id: prompt.id,
-                text: prompt.text,
-                imageUrl: prompt.image_url,
-            });
-        }
-    }
-
-    // Step 4: Combine data and filter out categories with no prompts
-    const result: PromptCategory[] = categories.map(category => ({
+    // Map the data from the Supabase join (which uses 'example_prompts')
+    // to the app's 'PromptCategory' type (which uses 'prompts')
+    const result: PromptCategory[] = data.map((category) => ({
         id: category.id,
         title: category.title,
-        prompts: promptsByCategoryId.get(category.id) || [],
-    })).filter(category => category.prompts.length > 0);
+        // The 'example_prompts' array is already nested by Supabase.
+        // We just need to map its contents to the 'Prompt' type.
+        prompts: (category.example_prompts as any[]).map((prompt: any) => ({
+            id: prompt.id,
+            text: prompt.prompt, // <-- FIX 2: Map 'prompt' to 'text'
+            imageUrl: prompt.image_url,
+        })),
+    }));
 
     return result;
 };
@@ -281,7 +347,7 @@ export const addPrompt = async (prompt: { text: string; imageFile: File | null }
         .from('example_prompts')
         .insert({
             category_id: category.id,
-            text: prompt.text,
+            prompt: prompt.text, // <-- FIX 3: Insert into 'prompt'
             image_url: imageUrl,
         });
 
@@ -322,7 +388,7 @@ export const updatePrompt = async (
     await supabase
         .from('example_prompts')
         .update({
-            text: updates.text,
+            prompt: updates.text, // <-- FIX 4: Update 'prompt'
             category_id: category.id,
             image_url: newImageUrl,
         })

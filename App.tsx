@@ -1,6 +1,5 @@
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { GenerationState, GenerativePart, PromptCategory, Prompt, Session, UserProfile, VisitorProfile, Plan, PaymentSettings, PlanCountryPrice, ContactFormData, ChatMessage } from './types';
+import { GenerationState, GenerativePart, PromptCategory, Prompt, Session, UserProfile, VisitorProfile, Plan, PaymentSettings, PlanCountryPrice, ContactFormData, ChatMessage, AppSettings, Coupon } from './types';
 import { generateImage, generateMultiPersonImage, generatePromptFromImage, createChat, generateVideo } from './services/geminiService';
 import * as adminService from './services/adminService';
 import { supabase } from './services/supabaseClient';
@@ -19,148 +18,15 @@ import ChatBox from './components/ChatBox';
 import VideoPlayer from './components/VideoPlayer';
 import HistoryDisplay from './components/HistoryDisplay';
 import { Chat } from '@google/genai';
+import { fileToGenerativePart } from './utils/fileHelpers';
+import ContactModal from './components/ContactModal';
 
-
-const fileToGenerativePart = (file: File): Promise<GenerativePart> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64String = (reader.result as string)?.split(',')[1];
-      if (base64String) {
-        resolve({
-          mimeType: file.type,
-          data: base64String,
-        });
-      } else {
-        reject(new Error("Failed to read file as base64."));
-      }
-    };
-    reader.onerror = (error) => reject(error);
-    reader.readAsDataURL(file);
-  });
-};
 
 const dataUrlToFile = async (dataUrl: string, filename: string): Promise<File> => {
     const res = await fetch(dataUrl);
     const blob = await res.blob();
     return new File([blob], filename, { type: blob.type });
 };
-
-interface ContactModalProps {
-  onClose: () => void;
-  session: Session | null;
-  profile: UserProfile | null;
-}
-
-const ContactModal: React.FC<ContactModalProps> = ({ onClose, session, profile }) => {
-    const [name, setName] = useState('');
-    const [email, setEmail] = useState('');
-    const [subject, setSubject] = useState('');
-    const [message, setMessage] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [success, setSuccess] = useState(false);
-
-    useEffect(() => {
-        if (profile?.email) {
-            setEmail(profile.email);
-            // Pre-fill name from email if name field is empty
-            if (!name) {
-                const nameFromEmail = profile.email.split('@')[0]
-                    .replace(/[._0-9]/g, ' ') // Replace dots, underscores, numbers with space
-                    .trim()
-                    .replace(/\b\w/g, l => l.toUpperCase()); // Capitalize words
-                setName(nameFromEmail);
-            }
-        }
-    }, [profile]);
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!email.trim() || !subject.trim() || !message.trim()) {
-            setError("Please fill out all required fields.");
-            return;
-        }
-        setLoading(true);
-        setError('');
-        try {
-            await adminService.submitContactForm({ name, email, subject, message });
-            setSuccess(true);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'An unexpected error occurred.');
-        } finally {
-            setLoading(false);
-        }
-    };
-    
-    return (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 animate-fade-in">
-            <div className="bg-panel rounded-2xl shadow-2xl border border-border w-full max-w-lg relative">
-                <button
-                    onClick={onClose}
-                    className="absolute top-4 right-4 text-text-secondary hover:text-text-primary transition-colors"
-                    aria-label="Close contact form"
-                >
-                    <XMarkIcon className="w-6 h-6" />
-                </button>
-                <div className="p-8 space-y-6">
-                    <div className="text-center space-y-2">
-                        <div className="inline-block p-3 bg-brand/10 rounded-full">
-                           <MailIcon className="w-10 h-10 text-brand" />
-                        </div>
-                        <h2 className="text-3xl font-bold text-text-primary">Contact Us</h2>
-                        <p className="text-text-secondary">
-                            Have a question or feedback? We'd love to hear from you.
-                            <br />
-                            You can also email us directly at{' '}
-                            <a href="mailto:ai@nullpk.com" className="font-medium text-brand hover:underline">
-                                ai@nullpk.com
-                            </a>.
-                        </p>
-                    </div>
-
-                    {success ? (
-                        <div className="text-center p-6 bg-green-900/30 rounded-lg border border-green-700">
-                            <h3 className="text-xl font-bold text-green-300">Message Sent!</h3>
-                            <p className="text-green-400 mt-2">Thank you for reaching out. We'll get back to you as soon as possible.</p>
-                            <button onClick={onClose} className="mt-4 px-4 py-2 bg-brand text-white font-semibold rounded-lg hover:bg-brand-hover">Close</button>
-                        </div>
-                    ) : (
-                        <form onSubmit={handleSubmit} className="space-y-4">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <label htmlFor="contact-name" className="block text-sm font-medium text-text-secondary mb-1">Name</label>
-                                    <input id="contact-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your Name" className="w-full p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand" />
-                                </div>
-                                <div>
-                                    <label htmlFor="contact-email" className="block text-sm font-medium text-text-secondary mb-1">Email <span className="text-red-400">*</span></label>
-                                    <input id="contact-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="your@email.com" required className="w-full p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand" />
-                                </div>
-                            </div>
-                            <div>
-                                <label htmlFor="contact-subject" className="block text-sm font-medium text-text-secondary mb-1">Subject <span className="text-red-400">*</span></label>
-                                <input id="contact-subject" type="text" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="How can we help?" required className="w-full p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand" />
-                            </div>
-                            <div>
-                                <label htmlFor="contact-message" className="block text-sm font-medium text-text-secondary mb-1">Message <span className="text-red-400">*</span></label>
-                                <textarea id="contact-message" value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Your message..." required rows={5} className="w-full p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand resize-y"></textarea>
-                            </div>
-                            {error && <p className="text-red-400 text-sm text-center">{error}</p>}
-                            <button
-                                type="submit"
-                                disabled={loading}
-                                className="w-full py-3 px-4 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover transition-colors disabled:opacity-50 disabled:cursor-wait"
-                            >
-                                {loading ? 'Sending...' : 'Send Message'}
-                            </button>
-                        </form>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-};
-
 
 const App: React.FC = () => {
   const [prompt, setPrompt] = useState<string>('');
@@ -178,6 +44,8 @@ const App: React.FC = () => {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [planCountryPrices, setPlanCountryPrices] = useState<PlanCountryPrice[]>([]);
   const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
 
   // Generation Mode
   const [generationMode, setGenerationMode] = useState<'single' | 'multi' | 'video'>('single');
@@ -234,8 +102,10 @@ const App: React.FC = () => {
   // History state
   const [historyImageUrls, setHistoryImageUrls] = useState<string[]>([]);
 
-  const IMAGE_CREDIT_COST = 1;
-  const VIDEO_CREDIT_COST = 5;
+  const IMAGE_CREDIT_COST = appSettings?.image_credit_cost ?? 3;
+  const VIDEO_CREDIT_COST = appSettings?.video_credit_cost ?? 50;
+  const PROMPT_CREDIT_COST = appSettings?.prompt_credit_cost ?? 1;
+  const CHAT_CREDIT_COST = appSettings?.chat_credit_cost ?? 1;
 
   // Auth Effect
   useEffect(() => {
@@ -282,24 +152,19 @@ const App: React.FC = () => {
     
     try {
         const storedVisitor = localStorage.getItem('visitorProfile');
-        const today = new Date().toISOString().split('T')[0];
         let currentVisitor: VisitorProfile;
 
         if (storedVisitor) {
             currentVisitor = JSON.parse(storedVisitor);
-            if (currentVisitor.lastVisitDate !== today) {
-                // New day, reset credits
-                currentVisitor = { credits: 10, lastVisitDate: today };
-            }
         } else {
-            // First time visitor
-            currentVisitor = { credits: 10, lastVisitDate: today };
+            // First time visitor, give one-time credits
+            currentVisitor = { credits: 15 };
         }
         setVisitorProfile(currentVisitor);
         localStorage.setItem('visitorProfile', JSON.stringify(currentVisitor));
     } catch (e) {
         console.error("Failed to manage visitor profile:", e);
-        setVisitorProfile({ credits: 10, lastVisitDate: new Date().toISOString().split('T')[0] });
+        setVisitorProfile({ credits: 15 });
     }
   }, [session]);
 
@@ -326,7 +191,7 @@ const App: React.FC = () => {
                 setGenerationState(GenerationState.SUCCESS);
                 setHistoryImageUrls(prev => [...imageUrls, ...prev]);
 
-                const newCredits = (visitorProfile?.credits ?? 1) - 1;
+                const newCredits = (visitorProfile?.credits ?? 1) - IMAGE_CREDIT_COST;
                 updateUserCredits(newCredits);
             } catch (err) {
                 console.error(err);
@@ -352,7 +217,7 @@ const App: React.FC = () => {
     };
 
     processQueue();
-  }, [queue, isSystemBusy, visitorId, uploadedImage, prompt, visitorProfile, imageSize, aspectRatio]);
+  }, [queue, isSystemBusy, visitorId, uploadedImage, prompt, visitorProfile, imageSize, aspectRatio, IMAGE_CREDIT_COST]);
 
   const updateUserCredits = (newCredits: number) => {
     if (session && profile) {
@@ -369,10 +234,11 @@ const App: React.FC = () => {
   useEffect(() => {
     const fetchSharedData = async () => {
         try {
-            const [fetchedPlans, settings, countryPrices] = await Promise.all([
+            const [fetchedPlans, settings, countryPrices, fetchedAppSettings] = await Promise.all([
                 adminService.getPlans(),
                 adminService.getPaymentSettings(),
-                adminService.getPlanCountryPrices()
+                adminService.getPlanCountryPrices(),
+                adminService.getAppSettings()
             ]);
             // Use fetched plans if available, otherwise use defaults as a fallback
             if (fetchedPlans && fetchedPlans.length > 0) {
@@ -383,6 +249,7 @@ const App: React.FC = () => {
             }
             setPaymentSettings(settings);
             setPlanCountryPrices(countryPrices || []);
+            setAppSettings(fetchedAppSettings);
         } catch (error) {
             console.error("Error fetching shared data (plans, settings):", error);
             // On failure, use default plans to ensure the UI is still functional
@@ -415,7 +282,7 @@ const App: React.FC = () => {
 
           if (lastReset < thirtyDaysAgo) {
             const planDetails = plans.find(p => p.name === data.plan);
-            const creditsToSet = planDetails ? planDetails.credits_per_month : (data.plan === 'pro' ? 1000 : 80);
+            const creditsToSet = planDetails ? planDetails.credits_per_month : (data.plan === 'pro' ? 1300 : 80);
             
             const { data: updatedProfile, error: updateError } = await supabase
               .from('profiles')
@@ -464,7 +331,7 @@ const App: React.FC = () => {
     if (!canUseAdmin && generationMode === 'video') {
         handleModeChange('single');
     }
-  }, [profile, session, generationMode, handleModeChange]);
+  }, [profile, session, generationMode, handleModeChange, aspectRatio, imageSize]);
 
   const handleUpgradeToPro = async () => {
     if (!session?.user) return;
@@ -543,9 +410,12 @@ const App: React.FC = () => {
     const fetchAdminData = async () => {
         if (isAdminPanelOpen && profile?.role === 'admin') {
             try {
-                const users = await adminService.getUsers();
+                const [users, fetchedCoupons] = await Promise.all([
+                    adminService.getUsers(),
+                    adminService.getCoupons()
+                ]);
                 setAllUsers(users);
-                // Plans, prices and settings are already fetched globally
+                setCoupons(fetchedCoupons);
             } catch (error) {
                 console.error("Error fetching admin data:", error);
                 setError("Could not load administrator data.");
@@ -595,7 +465,7 @@ const App: React.FC = () => {
   const currentCredits = session ? profile?.credits : visitorProfile?.credits;
   
   const handleGeneratePromptFromImage = async () => {
-    if ((currentCredits ?? 0) < IMAGE_CREDIT_COST) {
+    if ((currentCredits ?? 0) < PROMPT_CREDIT_COST) {
         setError("You don't have enough credits.");
         if (!session) setAuthModalView('sign_up');
         return;
@@ -611,7 +481,7 @@ const App: React.FC = () => {
         const generatedPrompt = await generatePromptFromImage(imagePart, promptFocus, promptKeywords);
         setPrompt(generatedPrompt);
         
-        const newCredits = (currentCredits ?? 0) - IMAGE_CREDIT_COST;
+        const newCredits = (currentCredits ?? 0) - PROMPT_CREDIT_COST;
         if (session) {
             const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', session.user.id).select().single();
             if(data) setProfile(p => p ? {...p, credits: data.credits} : null);
@@ -681,7 +551,7 @@ const App: React.FC = () => {
             setGenerationState(GenerationState.QUEUED);
         }
     }
-  }, [prompt, uploadedImage, session, profile, visitorProfile, currentCredits, queue, visitorId, imageSize, aspectRatio]);
+  }, [prompt, uploadedImage, session, profile, visitorProfile, currentCredits, queue, visitorId, imageSize, aspectRatio, IMAGE_CREDIT_COST]);
 
   const handleGenerateMultiPersonImage = useCallback(async () => {
     if ((currentCredits ?? 0) < IMAGE_CREDIT_COST) {
@@ -728,7 +598,7 @@ const App: React.FC = () => {
         setError(err instanceof Error ? err.message : 'An unknown error occurred during image generation.');
         setGenerationState(GenerationState.ERROR);
     }
-  }, [prompt, uploadedImage, uploadedImageTwo, session, profile, currentCredits, imageSize, aspectRatio]);
+  }, [prompt, uploadedImage, uploadedImageTwo, session, profile, currentCredits, imageSize, aspectRatio, IMAGE_CREDIT_COST]);
   
   const handleGenerateVideo = useCallback(async () => {
     if (profile?.role !== 'admin') {
@@ -768,15 +638,8 @@ const App: React.FC = () => {
         
         const downloadLink = await generateVideo(prompt, baseImagePart);
         
-        const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new Error(`Failed to download video file (${response.status}): ${errorBody}`);
-        }
-        const videoBlob = await response.blob();
-        const blobUrl = URL.createObjectURL(videoBlob);
+        setGeneratedVideoUrl(downloadLink); // Pass the direct URL
         
-        setGeneratedVideoUrl(blobUrl);
         setGenerationState(GenerationState.SUCCESS);
 
         const newCredits = (currentCredits ?? 0) - VIDEO_CREDIT_COST;
@@ -789,7 +652,7 @@ const App: React.FC = () => {
         setGenerationState(GenerationState.ERROR);
     }
 
-  }, [prompt, uploadedImage, session, profile, currentCredits, generatedVideoUrl, handleModeChange]);
+  }, [prompt, uploadedImage, session, profile, currentCredits, generatedVideoUrl, handleModeChange, VIDEO_CREDIT_COST]);
   
   const handleLeaveQueue = () => {
     setQueue(q => q.filter(id => id !== visitorId));
@@ -837,8 +700,7 @@ const App: React.FC = () => {
   const handleSendMessage = async (message: string) => {
     if (!chatSession || !profile) return;
     
-    const requiredCredits = 1;
-    if ((currentCredits ?? 0) < requiredCredits) {
+    if ((currentCredits ?? 0) < CHAT_CREDIT_COST) {
         setChatError("You don't have enough credits to chat.");
         return;
     }
@@ -851,7 +713,7 @@ const App: React.FC = () => {
         const response = await chatSession.sendMessage({ message });
         setChatMessages(prev => [...prev, { role: 'model', text: response.text }]);
         
-        const newCredits = profile.credits - requiredCredits;
+        const newCredits = profile.credits - CHAT_CREDIT_COST;
         const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', profile.id).select().single();
         if (data) setProfile(p => p ? {...p, credits: data.credits} : null);
         
@@ -934,6 +796,26 @@ const App: React.FC = () => {
   const handleAdminDeletePlanCountryPrice = async (priceId: number) => {
     await adminService.deletePlanCountryPrice(priceId);
     setPlanCountryPrices(prev => prev.filter(p => p.id !== priceId));
+  };
+
+  const handleAdminUpdateAppSettings = async (updates: Partial<Omit<AppSettings, 'id'>>) => {
+      const updatedSettings = await adminService.updateAppSettings(updates);
+      setAppSettings(updatedSettings);
+  };
+
+  const handleAdminAddCoupon = async (couponData: Omit<Coupon, 'id' | 'times_used' | 'created_at'>) => {
+      const newCoupon = await adminService.addCoupon(couponData);
+      setCoupons(prev => [newCoupon, ...prev].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+  };
+
+  const handleAdminUpdateCoupon = async (couponId: number, updates: Partial<Coupon>) => {
+      const updatedCoupon = await adminService.updateCoupon(couponId, updates);
+      setCoupons(prev => prev.map(c => c.id === couponId ? updatedCoupon : c));
+  };
+
+  const handleAdminDeleteCoupon = async (couponId: number) => {
+      await adminService.deleteCoupon(couponId);
+      setCoupons(prev => prev.filter(c => c.id !== couponId));
   };
 
   const handlePlanSelection = (planName: string) => {
@@ -1041,7 +923,7 @@ const App: React.FC = () => {
     }
     
     if ((currentCredits ?? 0) < IMAGE_CREDIT_COST) return 'Out of Credits';
-    return `Generate Image (${IMAGE_CREDIT_COST} Credit)`;
+    return `Generate Image (${IMAGE_CREDIT_COST} Credits)`;
   };
   
   const renderCreditWarning = () => {
@@ -1054,7 +936,7 @@ const App: React.FC = () => {
     } else {
         return (
             <p className="text-amber-400 text-sm text-center mt-3">
-                You've used your daily credits. <button onClick={() => setAuthModalView('sign_up')} className="font-bold underline hover:text-amber-300">Sign Up</button> to get {freeCredits} free credits!
+                You've used your trial credits. <button onClick={() => setAuthModalView('sign_up')} className="font-bold underline hover:text-amber-300">Sign Up</button> to get {freeCredits} free credits!
             </p>
         );
     }
@@ -1084,6 +966,8 @@ const App: React.FC = () => {
           prompts={examplePrompts}
           paymentSettings={paymentSettings}
           planCountryPrices={planCountryPrices}
+          appSettings={appSettings}
+          coupons={coupons}
           onAddPrompt={handleAddPrompt}
           onRemovePrompt={handleRemovePrompt}
           onUpdatePrompt={handleUpdatePrompt}
@@ -1094,6 +978,10 @@ const App: React.FC = () => {
           onAddPlanCountryPrice={handleAdminAddPlanCountryPrice}
           onUpdatePlanCountryPrice={handleAdminUpdatePlanCountryPrice}
           onDeletePlanCountryPrice={handleAdminDeletePlanCountryPrice}
+          onUpdateAppSettings={handleAdminUpdateAppSettings}
+          onAddCoupon={handleAdminAddCoupon}
+          onUpdateCoupon={handleAdminUpdateCoupon}
+          onDeleteCoupon={handleAdminDeleteCoupon}
           onClose={() => setIsAdminPanelOpen(false)}
         />
       )}
@@ -1241,11 +1129,11 @@ const App: React.FC = () => {
                         </div>
                         <button
                             onClick={handleGeneratePromptFromImage}
-                            disabled={isGenerating || isQueued || isGeneratingPrompt || !promptGenImage || (currentCredits ?? 0) < IMAGE_CREDIT_COST}
+                            disabled={isGenerating || isQueued || isGeneratingPrompt || !promptGenImage || (currentCredits ?? 0) < PROMPT_CREDIT_COST}
                             className="w-full flex items-center justify-center py-3 px-4 bg-panel-light text-text-primary font-semibold rounded-lg shadow-md hover:bg-border transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <PhotoIcon className="w-5 h-5 mr-2" />
-                            {isGeneratingPrompt ? `Analyzing... (${IMAGE_CREDIT_COST} Credit)` : `Generate Prompt (${IMAGE_CREDIT_COST} Credit)`}
+                            {isGeneratingPrompt ? `Analyzing... (${PROMPT_CREDIT_COST} Credit)` : `Generate Prompt (${PROMPT_CREDIT_COST} Credit)`}
                         </button>
                     </div>
                     </div>
@@ -1506,6 +1394,7 @@ const App: React.FC = () => {
             profile={profile}
             onClose={() => setIsChatOpen(false)}
             onSendMessage={handleSendMessage}
+            chatCreditCost={CHAT_CREDIT_COST}
         />
       )}
       

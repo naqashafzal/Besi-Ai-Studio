@@ -1,7 +1,7 @@
-
-import React, 'react';
+import React, { useState, useMemo } from 'react';
 import { XMarkIcon, StarIcon, SparklesIcon } from './Icons';
 import { Plan, PaymentSettings, UserProfile } from '../types';
+import { validateCoupon } from '../services/adminService';
 
 interface MembershipModalProps {
   plan: Plan;
@@ -13,8 +13,13 @@ interface MembershipModalProps {
 }
 
 const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgrade, country, paymentSettings, profile }) => {
-    const [isUpgrading, setIsUpgrading] = React.useState(false);
-    
+    const [isUpgrading, setIsUpgrading] = useState(false);
+    const [couponCode, setCouponCode] = useState('');
+    const [appliedDiscount, setAppliedDiscount] = useState<{ value: number; type: string } | null>(null);
+    const [couponMessage, setCouponMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+    const [isApplying, setIsApplying] = useState(false);
+    const [showCouponInput, setShowCouponInput] = useState(false);
+
     const isPakistan = country === 'Pakistan';
     const canPayManually = isPakistan && !!paymentSettings?.manual_payment_instructions_pk;
     const canPayWithPayPal = !!paymentSettings?.paypal_client_id;
@@ -28,6 +33,39 @@ const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgr
             setIsUpgrading(false);
         }
     };
+
+    const handleApplyCoupon = async () => {
+        if (!couponCode.trim()) return;
+        setIsApplying(true);
+        setCouponMessage(null);
+        try {
+            const result = await validateCoupon(couponCode, plan.id);
+            if (result.isValid && result.discountValue && result.discountType) {
+                setAppliedDiscount({ value: result.discountValue, type: result.discountType });
+                setCouponMessage({ text: result.message, type: 'success' });
+            } else {
+                setAppliedDiscount(null);
+                setCouponMessage({ text: result.message, type: 'error' });
+            }
+        } catch (err) {
+            setAppliedDiscount(null);
+            setCouponMessage({ text: "An unexpected error occurred.", type: 'error' });
+        } finally {
+            setIsApplying(false);
+        }
+    };
+
+    const finalPrice = useMemo(() => {
+        if (!appliedDiscount) return plan.price;
+        if (appliedDiscount.type === 'percentage') {
+            return plan.price * (1 - appliedDiscount.value / 100);
+        }
+        if (appliedDiscount.type === 'fixed_amount') {
+            return Math.max(0, plan.price - appliedDiscount.value);
+        }
+        return plan.price;
+    }, [plan.price, appliedDiscount]);
+
 
     const renderPaymentAction = () => {
         const manualPaymentJSX = canPayManually && (
@@ -136,8 +174,40 @@ const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgr
                 </div>
 
                  <div className="text-center">
-                    <p className="text-4xl font-extrabold text-text-primary">${plan.price.toFixed(2)}<span className="text-lg font-medium text-text-secondary">/month</span></p>
+                    {appliedDiscount ? (
+                        <p className="text-4xl font-extrabold text-text-primary">
+                            <s className="text-2xl text-text-secondary">${plan.price.toFixed(2)}</s> ${finalPrice.toFixed(2)}
+                            <span className="text-lg font-medium text-text-secondary">/month</span>
+                        </p>
+                    ) : (
+                        <p className="text-4xl font-extrabold text-text-primary">${plan.price.toFixed(2)}<span className="text-lg font-medium text-text-secondary">/month</span></p>
+                    )}
                  </div>
+                 
+                <div className="my-4">
+                    {!showCouponInput ? (
+                        <button onClick={() => setShowCouponInput(true)} className="text-sm text-brand hover:underline w-full text-center">
+                            Have a coupon code?
+                        </button>
+                    ) : (
+                        <div className="space-y-2 animate-fade-in">
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={couponCode}
+                                    onChange={e => setCouponCode(e.target.value.toUpperCase())}
+                                    placeholder="Enter coupon code"
+                                    className="w-full p-2 bg-background border border-border rounded-lg"
+                                    disabled={isApplying}
+                                />
+                                <button onClick={handleApplyCoupon} disabled={isApplying || !couponCode} className="px-4 py-2 bg-brand text-white font-semibold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                    {isApplying ? '...' : 'Apply'}
+                                </button>
+                            </div>
+                            {couponMessage && <p className={`text-xs text-center ${couponMessage.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>{couponMessage.text}</p>}
+                        </div>
+                    )}
+                </div>
 
                  {renderPaymentAction()}
             </div>

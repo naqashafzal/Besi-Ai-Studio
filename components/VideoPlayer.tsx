@@ -14,7 +14,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoUrl }) => {
         controls
         autoPlay
         loop
-        className="w-full max-w-full rounded-lg shadow-2xl mb-4 border-2 border-brand-primary"
+        className="w-full max-w-full rounded-lg shadow-2xl mb-4 border-2 border-brand"
       >
         Your browser does not support the video tag.
       </video>

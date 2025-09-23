@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Session, UserProfile, VisitorProfile, Plan } from '../types';
 import { supabase } from '../services/supabaseClient';
@@ -89,7 +88,7 @@ const Header: React.FC<HeaderProps> = ({
         <div className="flex-shrink-0 flex flex-col sm:flex-row items-center gap-3 self-center">
           <div className="flex items-center gap-2 bg-panel p-2 rounded-lg border border-border w-full sm:w-auto justify-center">
             <CreditIcon className="w-6 h-6 text-brand-secondary" />
-            <p className="font-semibold text-text-primary">{visitorProfile?.credits ?? 0} <span className="text-text-secondary text-sm">Daily Credits</span></p>
+            <p className="font-semibold text-text-primary">{visitorProfile?.credits ?? 0} <span className="text-text-secondary text-sm">Trial Credits</span></p>
           </div>
           <div className="flex items-center gap-3 w-full sm:w-auto">
             <button
