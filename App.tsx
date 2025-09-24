@@ -1,5 +1,7 @@
+
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { GenerationState, GenerativePart, PromptCategory, Prompt, Session, UserProfile, VisitorProfile, Plan, PaymentSettings, PlanCountryPrice, ContactFormData, ChatMessage, AppSettings, Coupon } from './types';
+import { GenerationState, GenerativePart, PromptCategory, Prompt, Session, UserProfile, VisitorProfile, Plan, PaymentSettings, PlanCountryPrice, ContactFormData, ChatMessage } from './types';
 import { generateImage, generateMultiPersonImage, generatePromptFromImage, createChat, generateVideo } from './services/geminiService';
 import * as adminService from './services/adminService';
 import { supabase } from './services/supabaseClient';
@@ -44,8 +46,6 @@ const App: React.FC = () => {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [planCountryPrices, setPlanCountryPrices] = useState<PlanCountryPrice[]>([]);
   const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
-  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
-  const [coupons, setCoupons] = useState<Coupon[]>([]);
 
   // Generation Mode
   const [generationMode, setGenerationMode] = useState<'single' | 'multi' | 'video'>('single');
@@ -102,10 +102,8 @@ const App: React.FC = () => {
   // History state
   const [historyImageUrls, setHistoryImageUrls] = useState<string[]>([]);
 
-  const IMAGE_CREDIT_COST = appSettings?.image_credit_cost ?? 3;
-  const VIDEO_CREDIT_COST = appSettings?.video_credit_cost ?? 50;
-  const PROMPT_CREDIT_COST = appSettings?.prompt_credit_cost ?? 1;
-  const CHAT_CREDIT_COST = appSettings?.chat_credit_cost ?? 1;
+  const IMAGE_CREDIT_COST = 1;
+  const VIDEO_CREDIT_COST = 5;
 
   // Auth Effect
   useEffect(() => {
@@ -152,19 +150,24 @@ const App: React.FC = () => {
     
     try {
         const storedVisitor = localStorage.getItem('visitorProfile');
+        const today = new Date().toISOString().split('T')[0];
         let currentVisitor: VisitorProfile;
 
         if (storedVisitor) {
             currentVisitor = JSON.parse(storedVisitor);
+            if (currentVisitor.lastVisitDate !== today) {
+                // New day, reset credits
+                currentVisitor = { credits: 10, lastVisitDate: today };
+            }
         } else {
-            // First time visitor, give one-time credits
-            currentVisitor = { credits: 15 };
+            // First time visitor
+            currentVisitor = { credits: 10, lastVisitDate: today };
         }
         setVisitorProfile(currentVisitor);
         localStorage.setItem('visitorProfile', JSON.stringify(currentVisitor));
     } catch (e) {
         console.error("Failed to manage visitor profile:", e);
-        setVisitorProfile({ credits: 15 });
+        setVisitorProfile({ credits: 10, lastVisitDate: new Date().toISOString().split('T')[0] });
     }
   }, [session]);
 
@@ -191,7 +194,7 @@ const App: React.FC = () => {
                 setGenerationState(GenerationState.SUCCESS);
                 setHistoryImageUrls(prev => [...imageUrls, ...prev]);
 
-                const newCredits = (visitorProfile?.credits ?? 1) - IMAGE_CREDIT_COST;
+                const newCredits = (visitorProfile?.credits ?? 1) - 1;
                 updateUserCredits(newCredits);
             } catch (err) {
                 console.error(err);
@@ -217,7 +220,7 @@ const App: React.FC = () => {
     };
 
     processQueue();
-  }, [queue, isSystemBusy, visitorId, uploadedImage, prompt, visitorProfile, imageSize, aspectRatio, IMAGE_CREDIT_COST]);
+  }, [queue, isSystemBusy, visitorId, uploadedImage, prompt, visitorProfile, imageSize, aspectRatio]);
 
   const updateUserCredits = (newCredits: number) => {
     if (session && profile) {
@@ -234,11 +237,10 @@ const App: React.FC = () => {
   useEffect(() => {
     const fetchSharedData = async () => {
         try {
-            const [fetchedPlans, settings, countryPrices, fetchedAppSettings] = await Promise.all([
+            const [fetchedPlans, settings, countryPrices] = await Promise.all([
                 adminService.getPlans(),
                 adminService.getPaymentSettings(),
-                adminService.getPlanCountryPrices(),
-                adminService.getAppSettings()
+                adminService.getPlanCountryPrices()
             ]);
             // Use fetched plans if available, otherwise use defaults as a fallback
             if (fetchedPlans && fetchedPlans.length > 0) {
@@ -249,7 +251,6 @@ const App: React.FC = () => {
             }
             setPaymentSettings(settings);
             setPlanCountryPrices(countryPrices || []);
-            setAppSettings(fetchedAppSettings);
         } catch (error) {
             console.error("Error fetching shared data (plans, settings):", error);
             // On failure, use default plans to ensure the UI is still functional
@@ -282,7 +283,7 @@ const App: React.FC = () => {
 
           if (lastReset < thirtyDaysAgo) {
             const planDetails = plans.find(p => p.name === data.plan);
-            const creditsToSet = planDetails ? planDetails.credits_per_month : (data.plan === 'pro' ? 1300 : 80);
+            const creditsToSet = planDetails ? planDetails.credits_per_month : (data.plan === 'pro' ? 1000 : 80);
             
             const { data: updatedProfile, error: updateError } = await supabase
               .from('profiles')
@@ -331,9 +332,9 @@ const App: React.FC = () => {
     if (!canUseAdmin && generationMode === 'video') {
         handleModeChange('single');
     }
-  }, [profile, session, generationMode, handleModeChange, aspectRatio, imageSize]);
+  }, [profile, session, generationMode, handleModeChange]);
 
-  const handleUpgradeToPro = async () => {
+  const handleUpgradeToPro = useCallback(async () => {
     if (!session?.user) return;
     const proPlan = plans.find(p => p.name === 'pro');
     if (!proPlan) {
@@ -346,7 +347,7 @@ const App: React.FC = () => {
             .from('profiles')
             .update({ 
                 plan: 'pro', 
-                credits: proPlan.credits_per_month, 
+                credits: (profile?.credits ?? 0) + proPlan.credits_per_month, 
                 credits_reset_at: new Date().toISOString() 
             })
             .eq('id', session.user.id)
@@ -362,7 +363,26 @@ const App: React.FC = () => {
         console.error("Error upgrading to pro:", err);
         setError("Could not complete upgrade. Please try again.");
     }
-  };
+  }, [session, plans, profile]);
+
+  // PayPal Success Handler
+  useEffect(() => {
+    const handlePaypalSuccess = async () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('paypal_success') === 'true' && session) {
+            const plan = urlParams.get('plan');
+            if (plan === 'pro') {
+                await handleUpgradeToPro();
+            }
+            // Clean URL
+            const newUrl = `${window.location.pathname}`;
+            window.history.replaceState({}, '', newUrl);
+        }
+    };
+    if (session) {
+      handlePaypalSuccess();
+    }
+}, [session, handleUpgradeToPro]);
 
   useEffect(() => {
     const fetchPrompts = async () => {
@@ -410,12 +430,9 @@ const App: React.FC = () => {
     const fetchAdminData = async () => {
         if (isAdminPanelOpen && profile?.role === 'admin') {
             try {
-                const [users, fetchedCoupons] = await Promise.all([
-                    adminService.getUsers(),
-                    adminService.getCoupons()
-                ]);
+                const users = await adminService.getUsers();
                 setAllUsers(users);
-                setCoupons(fetchedCoupons);
+                // Plans, prices and settings are already fetched globally
             } catch (error) {
                 console.error("Error fetching admin data:", error);
                 setError("Could not load administrator data.");
@@ -465,7 +482,7 @@ const App: React.FC = () => {
   const currentCredits = session ? profile?.credits : visitorProfile?.credits;
   
   const handleGeneratePromptFromImage = async () => {
-    if ((currentCredits ?? 0) < PROMPT_CREDIT_COST) {
+    if ((currentCredits ?? 0) < IMAGE_CREDIT_COST) {
         setError("You don't have enough credits.");
         if (!session) setAuthModalView('sign_up');
         return;
@@ -481,7 +498,7 @@ const App: React.FC = () => {
         const generatedPrompt = await generatePromptFromImage(imagePart, promptFocus, promptKeywords);
         setPrompt(generatedPrompt);
         
-        const newCredits = (currentCredits ?? 0) - PROMPT_CREDIT_COST;
+        const newCredits = (currentCredits ?? 0) - IMAGE_CREDIT_COST;
         if (session) {
             const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', session.user.id).select().single();
             if(data) setProfile(p => p ? {...p, credits: data.credits} : null);
@@ -551,7 +568,7 @@ const App: React.FC = () => {
             setGenerationState(GenerationState.QUEUED);
         }
     }
-  }, [prompt, uploadedImage, session, profile, visitorProfile, currentCredits, queue, visitorId, imageSize, aspectRatio, IMAGE_CREDIT_COST]);
+  }, [prompt, uploadedImage, session, profile, visitorProfile, currentCredits, queue, visitorId, imageSize, aspectRatio]);
 
   const handleGenerateMultiPersonImage = useCallback(async () => {
     if ((currentCredits ?? 0) < IMAGE_CREDIT_COST) {
@@ -598,7 +615,7 @@ const App: React.FC = () => {
         setError(err instanceof Error ? err.message : 'An unknown error occurred during image generation.');
         setGenerationState(GenerationState.ERROR);
     }
-  }, [prompt, uploadedImage, uploadedImageTwo, session, profile, currentCredits, imageSize, aspectRatio, IMAGE_CREDIT_COST]);
+  }, [prompt, uploadedImage, uploadedImageTwo, session, profile, currentCredits, imageSize, aspectRatio]);
   
   const handleGenerateVideo = useCallback(async () => {
     if (profile?.role !== 'admin') {
@@ -652,7 +669,7 @@ const App: React.FC = () => {
         setGenerationState(GenerationState.ERROR);
     }
 
-  }, [prompt, uploadedImage, session, profile, currentCredits, generatedVideoUrl, handleModeChange, VIDEO_CREDIT_COST]);
+  }, [prompt, uploadedImage, session, profile, currentCredits, generatedVideoUrl, handleModeChange]);
   
   const handleLeaveQueue = () => {
     setQueue(q => q.filter(id => id !== visitorId));
@@ -700,7 +717,8 @@ const App: React.FC = () => {
   const handleSendMessage = async (message: string) => {
     if (!chatSession || !profile) return;
     
-    if ((currentCredits ?? 0) < CHAT_CREDIT_COST) {
+    const requiredCredits = 1;
+    if ((currentCredits ?? 0) < requiredCredits) {
         setChatError("You don't have enough credits to chat.");
         return;
     }
@@ -713,7 +731,7 @@ const App: React.FC = () => {
         const response = await chatSession.sendMessage({ message });
         setChatMessages(prev => [...prev, { role: 'model', text: response.text }]);
         
-        const newCredits = profile.credits - CHAT_CREDIT_COST;
+        const newCredits = profile.credits - requiredCredits;
         const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', profile.id).select().single();
         if (data) setProfile(p => p ? {...p, credits: data.credits} : null);
         
@@ -796,26 +814,6 @@ const App: React.FC = () => {
   const handleAdminDeletePlanCountryPrice = async (priceId: number) => {
     await adminService.deletePlanCountryPrice(priceId);
     setPlanCountryPrices(prev => prev.filter(p => p.id !== priceId));
-  };
-
-  const handleAdminUpdateAppSettings = async (updates: Partial<Omit<AppSettings, 'id'>>) => {
-      const updatedSettings = await adminService.updateAppSettings(updates);
-      setAppSettings(updatedSettings);
-  };
-
-  const handleAdminAddCoupon = async (couponData: Omit<Coupon, 'id' | 'times_used' | 'created_at'>) => {
-      const newCoupon = await adminService.addCoupon(couponData);
-      setCoupons(prev => [newCoupon, ...prev].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
-  };
-
-  const handleAdminUpdateCoupon = async (couponId: number, updates: Partial<Coupon>) => {
-      const updatedCoupon = await adminService.updateCoupon(couponId, updates);
-      setCoupons(prev => prev.map(c => c.id === couponId ? updatedCoupon : c));
-  };
-
-  const handleAdminDeleteCoupon = async (couponId: number) => {
-      await adminService.deleteCoupon(couponId);
-      setCoupons(prev => prev.filter(c => c.id !== couponId));
   };
 
   const handlePlanSelection = (planName: string) => {
@@ -923,7 +921,7 @@ const App: React.FC = () => {
     }
     
     if ((currentCredits ?? 0) < IMAGE_CREDIT_COST) return 'Out of Credits';
-    return `Generate Image (${IMAGE_CREDIT_COST} Credits)`;
+    return `Generate Image (${IMAGE_CREDIT_COST} Credit)`;
   };
   
   const renderCreditWarning = () => {
@@ -936,7 +934,7 @@ const App: React.FC = () => {
     } else {
         return (
             <p className="text-amber-400 text-sm text-center mt-3">
-                You've used your trial credits. <button onClick={() => setAuthModalView('sign_up')} className="font-bold underline hover:text-amber-300">Sign Up</button> to get {freeCredits} free credits!
+                You've used your daily credits. <button onClick={() => setAuthModalView('sign_up')} className="font-bold underline hover:text-amber-300">Sign Up</button> to get {freeCredits} free credits!
             </p>
         );
     }
@@ -966,8 +964,6 @@ const App: React.FC = () => {
           prompts={examplePrompts}
           paymentSettings={paymentSettings}
           planCountryPrices={planCountryPrices}
-          appSettings={appSettings}
-          coupons={coupons}
           onAddPrompt={handleAddPrompt}
           onRemovePrompt={handleRemovePrompt}
           onUpdatePrompt={handleUpdatePrompt}
@@ -978,16 +974,13 @@ const App: React.FC = () => {
           onAddPlanCountryPrice={handleAdminAddPlanCountryPrice}
           onUpdatePlanCountryPrice={handleAdminUpdatePlanCountryPrice}
           onDeletePlanCountryPrice={handleAdminDeletePlanCountryPrice}
-          onUpdateAppSettings={handleAdminUpdateAppSettings}
-          onAddCoupon={handleAdminAddCoupon}
-          onUpdateCoupon={handleAdminUpdateCoupon}
-          onDeleteCoupon={handleAdminDeleteCoupon}
           onClose={() => setIsAdminPanelOpen(false)}
         />
       )}
       {isMembershipModalOpen && proPlan && (
         <MembershipModal
             plan={proPlan}
+            planCountryPrices={planCountryPrices}
             onClose={() => setIsMembershipModalOpen(false)}
             onUpgrade={handleUpgradeToPro}
             country={profile?.country}
@@ -1129,11 +1122,11 @@ const App: React.FC = () => {
                         </div>
                         <button
                             onClick={handleGeneratePromptFromImage}
-                            disabled={isGenerating || isQueued || isGeneratingPrompt || !promptGenImage || (currentCredits ?? 0) < PROMPT_CREDIT_COST}
+                            disabled={isGenerating || isQueued || isGeneratingPrompt || !promptGenImage || (currentCredits ?? 0) < IMAGE_CREDIT_COST}
                             className="w-full flex items-center justify-center py-3 px-4 bg-panel-light text-text-primary font-semibold rounded-lg shadow-md hover:bg-border transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <PhotoIcon className="w-5 h-5 mr-2" />
-                            {isGeneratingPrompt ? `Analyzing... (${PROMPT_CREDIT_COST} Credit)` : `Generate Prompt (${PROMPT_CREDIT_COST} Credit)`}
+                            {isGeneratingPrompt ? `Analyzing... (${IMAGE_CREDIT_COST} Credit)` : `Generate Prompt (${IMAGE_CREDIT_COST} Credit)`}
                         </button>
                     </div>
                     </div>
@@ -1394,7 +1387,6 @@ const App: React.FC = () => {
             profile={profile}
             onClose={() => setIsChatOpen(false)}
             onSendMessage={handleSendMessage}
-            chatCreditCost={CHAT_CREDIT_COST}
         />
       )}
       

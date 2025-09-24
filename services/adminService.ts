@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { UserProfile, Plan, PaymentSettings, PlanCountryPrice, PromptCategory, ContactFormData, Prompt, AppSettings, Coupon } from '../types';
+import { UserProfile, Plan, PaymentSettings, PlanCountryPrice, PromptCategory, ContactFormData, Prompt } from '../types';
 
 /**
  * Fetches all user profiles from the database.
@@ -178,89 +178,6 @@ export const deletePlanCountryPrice = async (priceId: number): Promise<void> => 
         throw error;
     }
 };
-
-// --- App Settings ---
-export const getAppSettings = async (): Promise<AppSettings | null> => {
-    const { data, error } = await supabase
-        .from('app_settings')
-        .select('*')
-        .eq('id', 1) // Always get the single settings row
-        .single();
-
-    if (error) {
-        console.error("Error fetching app settings:", error);
-        if (error.code === 'PGRST116') return null; // Not found is ok, will be created on first update
-        throw error;
-    }
-    return data;
-};
-
-export const updateAppSettings = async (updates: Partial<Omit<AppSettings, 'id'>>): Promise<AppSettings> => {
-    const settingsData = { id: 1, ...updates };
-    const { data, error } = await supabase
-        .from('app_settings')
-        .upsert(settingsData)
-        .select()
-        .single();
-
-    if (error) {
-        console.error("Error updating app settings:", error);
-        throw error;
-    }
-    return data;
-};
-
-// --- Coupon Management ---
-export const getCoupons = async (): Promise<Coupon[]> => {
-    const { data, error } = await supabase.from('coupons').select('*').order('created_at', { ascending: false });
-    if (error) {
-        console.error("Error fetching coupons:", error);
-        throw error;
-    }
-    return data || [];
-};
-
-export const addCoupon = async (couponData: Omit<Coupon, 'id' | 'times_used' | 'created_at'>): Promise<Coupon> => {
-    const { data, error } = await supabase.from('coupons').insert([couponData]).select().single();
-    if (error) {
-        console.error("Error adding coupon:", error);
-        throw error;
-    }
-    return data;
-};
-
-export const updateCoupon = async (couponId: number, updates: Partial<Coupon>): Promise<Coupon> => {
-    const { data, error } = await supabase.from('coupons').update(updates).eq('id', couponId).select().single();
-    if (error) {
-        console.error("Error updating coupon:", error);
-        throw error;
-    }
-    return data;
-};
-
-export const deleteCoupon = async (couponId: number): Promise<void> => {
-    const { error } = await supabase.from('coupons').delete().eq('id', couponId);
-    if (error) {
-        console.error("Error deleting coupon:", error);
-        throw error;
-    }
-};
-
-// --- Public Coupon Validation ---
-export const validateCoupon = async (code: string, planId: number): Promise<{ isValid: boolean; discountValue?: number; discountType?: 'percentage' | 'fixed_amount'; message: string }> => {
-    const { data, error } = await supabase.rpc('validate_coupon', {
-        coupon_code: code,
-        plan_id_to_check: planId
-    });
-
-    if (error) {
-        console.error("Error validating coupon:", error);
-        return { isValid: false, message: "Could not validate coupon. Please try again." };
-    }
-    
-    return data;
-};
-
 
 // --- Prompt Management ---
 

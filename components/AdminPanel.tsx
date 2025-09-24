@@ -1,12 +1,16 @@
+
+
+
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { TrashIcon, XMarkIcon, PencilIcon, UserIcon, ClipboardIcon, KeyIcon } from './Icons';
-import { PromptCategory, Prompt, UserProfile, Plan, PaymentSettings, PlanCountryPrice, GenerativePart, AppSettings, Coupon } from '../types';
+import { PromptCategory, Prompt, UserProfile, Plan, PaymentSettings, PlanCountryPrice, GenerativePart } from '../types';
 import { countryList } from '../constants';
 import ImageUploader from './ImageUploader';
 import { generatePromptFromImage } from '../services/geminiService';
 import { fileToGenerativePart } from '../utils/fileHelpers';
 
-type AdminTab = 'users' | 'prompts' | 'settings' | 'payments' | 'coupons';
+type AdminTab = 'users' | 'prompts' | 'settings' | 'payments';
 
 interface AdminPanelProps {
   allUsers: UserProfile[];
@@ -14,8 +18,6 @@ interface AdminPanelProps {
   prompts: PromptCategory[];
   paymentSettings: PaymentSettings | null;
   planCountryPrices: PlanCountryPrice[];
-  appSettings: AppSettings | null;
-  coupons: Coupon[];
   onAddPrompt: (prompt: { text: string; imageFile: File | null }, categoryTitle: string) => void;
   onRemovePrompt: (promptId: string) => void;
   onUpdatePrompt: (promptId: string, updates: { text: string; categoryTitle: string; imageFile: File | null; removeImage: boolean }, originalImageUrl: string | null) => void;
@@ -26,10 +28,6 @@ interface AdminPanelProps {
   onAddPlanCountryPrice: (price: Omit<PlanCountryPrice, 'id'>) => Promise<void>;
   onUpdatePlanCountryPrice: (priceId: number, updates: Partial<PlanCountryPrice>) => Promise<void>;
   onDeletePlanCountryPrice: (priceId: number) => Promise<void>;
-  onUpdateAppSettings: (updates: Partial<Omit<AppSettings, 'id'>>) => Promise<void>;
-  onAddCoupon: (couponData: Omit<Coupon, 'id' | 'times_used' | 'created_at'>) => Promise<void>;
-  onUpdateCoupon: (couponId: number, updates: Partial<Coupon>) => Promise<void>;
-  onDeleteCoupon: (couponId: number) => Promise<void>;
   onClose: () => void;
 }
 
@@ -39,8 +37,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
     prompts, 
     paymentSettings,
     planCountryPrices,
-    appSettings,
-    coupons,
     onAddPrompt, 
     onRemovePrompt, 
     onUpdatePrompt,
@@ -51,10 +47,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
     onAddPlanCountryPrice,
     onUpdatePlanCountryPrice,
     onDeletePlanCountryPrice,
-    onUpdateAppSettings,
-    onAddCoupon,
-    onUpdateCoupon,
-    onDeleteCoupon,
     onClose 
 }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>('users');
@@ -78,7 +70,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
             <TabButton name="Prompts" tab="prompts" activeTab={activeTab} onClick={setActiveTab} />
             <TabButton name="Settings" tab="settings" activeTab={activeTab} onClick={setActiveTab} />
             <TabButton name="Payments" tab="payments" activeTab={activeTab} onClick={setActiveTab} />
-            <TabButton name="Coupons" tab="coupons" activeTab={activeTab} onClick={setActiveTab} />
         </div>
 
         <div className="flex-grow overflow-y-auto p-4 sm:p-6">
@@ -91,11 +82,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                                             onAddPlanCountryPrice={onAddPlanCountryPrice}
                                             onUpdatePlanCountryPrice={onUpdatePlanCountryPrice}
                                             onDeletePlanCountryPrice={onDeletePlanCountryPrice}
-                                            appSettings={appSettings}
-                                            onUpdateAppSettings={onUpdateAppSettings}
                                         />}
           {activeTab === 'payments' && <PaymentSettingsTab settings={paymentSettings} onUpdateSettings={onUpdatePaymentSettings} />}
-          {activeTab === 'coupons' && <CouponManagementTab coupons={coupons} plans={plans} onAdd={onAddCoupon} onUpdate={onUpdateCoupon} onDelete={onDeleteCoupon} />}
         </div>
       </div>
     </div>
@@ -192,6 +180,7 @@ const UserManagementTab: React.FC<UserManagementTabProps> = ({ users, onUpdateUs
     );
 };
 
+// FIX: Define props with an interface and use React.FC to allow for key prop in lists.
 interface UserRowProps {
     user: UserProfile;
     onEdit: (user: UserProfile) => void;
@@ -232,6 +221,7 @@ const UserRow: React.FC<UserRowProps> = ({ user, onEdit, onDelete }) => (
 );
 
 
+// FIX: Define props with an interface and use React.FC to allow for key prop in lists.
 interface EditUserRowProps {
     user: UserProfile;
     onSave: (updates: Partial<UserProfile>) => void | Promise<void>;
@@ -295,6 +285,7 @@ const PromptManagementTab: React.FC<{
       setNewPromptImageFile(file);
       const reader = new FileReader();
       reader.onload = (e) => setNewPromptImageDataUrl(e.target?.result as string);
+      // FIX: Corrected typo from readDataURL to readAsDataURL.
       reader.readAsDataURL(file);
     } else {
       setNewPromptImageFile(null);
@@ -428,6 +419,7 @@ const PromptManagementTab: React.FC<{
   );
 };
 
+// --- Edit Prompt Form Component ---
 interface EditPromptFormProps {
   prompt: Prompt;
   categoryTitle: string;
@@ -449,6 +441,7 @@ const EditPromptForm: React.FC<EditPromptFormProps> = ({ prompt, categoryTitle, 
       setRemoveImage(false);
       const reader = new FileReader();
       reader.onload = e => setImageDataUrl(e.target?.result as string);
+      // FIX: Corrected typo from readDataURL to readAsDataURL.
       reader.readAsDataURL(file);
     } else { // Image removed via uploader
       setImageFile(null);
@@ -504,8 +497,6 @@ interface SettingsTabProps {
     onAddPlanCountryPrice: (price: Omit<PlanCountryPrice, 'id'>) => Promise<void>;
     onUpdatePlanCountryPrice: (priceId: number, updates: Partial<PlanCountryPrice>) => Promise<void>;
     onDeletePlanCountryPrice: (priceId: number) => Promise<void>;
-    appSettings: AppSettings | null;
-    onUpdateAppSettings: (updates: Partial<Omit<AppSettings, 'id'>>) => Promise<void>;
 }
 const SettingsTab: React.FC<SettingsTabProps> = ({ 
     plans, 
@@ -514,8 +505,6 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
     onAddPlanCountryPrice,
     onUpdatePlanCountryPrice,
     onDeletePlanCountryPrice,
-    appSettings,
-    onUpdateAppSettings
 }) => {
     const [editablePlans, setEditablePlans] = useState<Plan[]>(plans);
     const [isSaving, setIsSaving] = useState(false);
@@ -585,11 +574,6 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
                         </div>
                     </div>
                 ))}
-            </div>
-
-             <div className="mt-12">
-                <h3 className="text-2xl font-bold text-text-primary mb-6">Credit Cost Settings</h3>
-                <CreditSettings settings={appSettings} onSave={onUpdateAppSettings} />
             </div>
             
             <div className="mt-12">
@@ -737,81 +721,6 @@ const RegionalPricingManager: React.FC<RegionalPricingManagerProps> = ({ plans, 
     );
 };
 
-// --- Credit Settings Component ---
-interface CreditSettingsProps {
-    settings: AppSettings | null;
-    onSave: (updates: Partial<Omit<AppSettings, 'id'>>) => Promise<void>;
-}
-
-const CreditSettings: React.FC<CreditSettingsProps> = ({ settings, onSave }) => {
-    const [costs, setCosts] = useState({
-        image_credit_cost: 3,
-        video_credit_cost: 50,
-        prompt_credit_cost: 1,
-        chat_credit_cost: 1,
-    });
-    const [isSaving, setIsSaving] = useState(false);
-
-    useEffect(() => {
-        if (settings) {
-            setCosts({
-                image_credit_cost: settings.image_credit_cost,
-                video_credit_cost: settings.video_credit_cost,
-                prompt_credit_cost: settings.prompt_credit_cost,
-                chat_credit_cost: settings.chat_credit_cost,
-            });
-        }
-    }, [settings]);
-
-    const handleChange = (field: keyof typeof costs, value: string) => {
-        const numValue = parseInt(value, 10);
-        if (!isNaN(numValue) && numValue >= 0) {
-            setCosts(prev => ({ ...prev, [field]: numValue }));
-        }
-    };
-    
-    const handleSave = async () => {
-        setIsSaving(true);
-        try {
-            await onSave(costs);
-            alert("Credit costs updated successfully!");
-        } catch (error) {
-            alert("Failed to update credit costs.");
-            console.error(error);
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    return (
-        <div className="bg-background p-6 rounded-lg border border-border space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-1">Image Generation</label>
-                    <input type="number" value={costs.image_credit_cost} onChange={e => handleChange('image_credit_cost', e.target.value)} className="w-full p-2 bg-panel-light border border-border rounded-lg" />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-1">Video Generation</label>
-                    <input type="number" value={costs.video_credit_cost} onChange={e => handleChange('video_credit_cost', e.target.value)} className="w-full p-2 bg-panel-light border border-border rounded-lg" />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-1">Prompt from Image</label>
-                    <input type="number" value={costs.prompt_credit_cost} onChange={e => handleChange('prompt_credit_cost', e.target.value)} className="w-full p-2 bg-panel-light border border-border rounded-lg" />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-1">AI Chat Message</label>
-                    <input type="number" value={costs.chat_credit_cost} onChange={e => handleChange('chat_credit_cost', e.target.value)} className="w-full p-2 bg-panel-light border border-border rounded-lg" />
-                </div>
-            </div>
-             <div className="mt-4 text-right">
-                <button onClick={handleSave} disabled={isSaving} className="px-5 py-2 bg-brand text-white font-semibold rounded-lg hover:bg-brand-hover disabled:opacity-50">
-                    {isSaving ? 'Saving...' : 'Save Credit Costs'}
-                </button>
-            </div>
-        </div>
-    );
-};
-
 
 // --- Payment Settings Tab ---
 interface PaymentSettingsTabProps {
@@ -939,211 +848,5 @@ const PaymentSettingsTab: React.FC<PaymentSettingsTabProps> = ({ settings, onUpd
         </div>
     );
 };
-
-// --- Coupon Management Tab ---
-interface CouponManagementTabProps {
-    coupons: Coupon[];
-    plans: Plan[];
-    onAdd: (couponData: Omit<Coupon, 'id' | 'times_used' | 'created_at'>) => Promise<void>;
-    onUpdate: (couponId: number, updates: Partial<Coupon>) => Promise<void>;
-    onDelete: (couponId: number) => Promise<void>;
-}
-const CouponManagementTab: React.FC<CouponManagementTabProps> = ({ coupons, plans, onAdd, onUpdate, onDelete }) => {
-    const [showForm, setShowForm] = useState(false);
-    const [editingCoupon, setEditingCoupon] = useState<Coupon | null>(null);
-
-    const handleEdit = (coupon: Coupon) => {
-        setEditingCoupon(coupon);
-        setShowForm(true);
-    };
-
-    const handleCancel = () => {
-        setEditingCoupon(null);
-        setShowForm(false);
-    };
-
-    const handleSave = async (couponData: Omit<Coupon, 'id' | 'times_used' | 'created_at' | 'is_active'> & { is_active: boolean }) => {
-        try {
-            if (editingCoupon) {
-                await onUpdate(editingCoupon.id, couponData);
-            } else {
-                await onAdd(couponData);
-            }
-            handleCancel();
-        } catch (error) {
-            alert(`Failed to save coupon. ${error instanceof Error ? error.message : ''}`);
-            console.error(error);
-        }
-    };
-
-    const handleDelete = async (couponId: number) => {
-        if (window.confirm("Are you sure you want to delete this coupon? This action cannot be undone.")) {
-            try {
-                await onDelete(couponId);
-            } catch (error) {
-                alert("Failed to delete coupon.");
-            }
-        }
-    };
-    
-    return (
-        <div className="space-y-6">
-            <div className="flex justify-between items-center">
-                <h3 className="text-2xl font-bold text-text-primary">Manage Coupons</h3>
-                {!showForm && (
-                    <button onClick={() => setShowForm(true)} className="px-4 py-2 bg-brand text-white font-semibold rounded-lg hover:bg-brand-hover">
-                        Add New Coupon
-                    </button>
-                )}
-            </div>
-            
-            {showForm && <CouponForm plans={plans} coupon={editingCoupon} onSave={handleSave} onCancel={handleCancel} />}
-
-            <div className="border border-border rounded-lg overflow-hidden">
-                <div className="hidden md:grid md:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_auto] gap-4 p-3 bg-panel-light text-xs text-text-secondary uppercase tracking-wider font-bold">
-                    <div>Code</div>
-                    <div>Discount</div>
-                    <div>Plan</div>
-                    <div>Usage</div>
-                    <div>Expires</div>
-                    <div>Status</div>
-                    <div className="text-right">Actions</div>
-                </div>
-                <div>
-                    {coupons.map(coupon => (
-                        <CouponRow key={coupon.id} coupon={coupon} plans={plans} onEdit={handleEdit} onDelete={handleDelete} />
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const CouponRow: React.FC<{ coupon: Coupon; plans: Plan[]; onEdit: (c: Coupon) => void; onDelete: (id: number) => void; }> = ({ coupon, plans, onEdit, onDelete }) => {
-    const planName = coupon.applicable_plan_id ? plans.find(p => p.id === coupon.applicable_plan_id)?.name : 'All Plans';
-    const expires = coupon.expires_at ? new Date(coupon.expires_at).toLocaleDateString() : 'Never';
-    const discount = coupon.discount_type === 'percentage' ? `${coupon.discount_value}%` : `$${coupon.discount_value}`;
-    const usage = coupon.usage_limit ? `${coupon.times_used} / ${coupon.usage_limit}` : `${coupon.times_used}`;
-    
-    return (
-         <div className="p-4 border-b border-border last:border-b-0 hover:bg-panel-light/50 md:grid md:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_auto] md:gap-4 md:items-center text-sm">
-            {/* Mobile View */}
-            <div className="md:hidden space-y-2">
-                 <div className="flex justify-between items-start">
-                    <div>
-                        <span className="font-bold text-text-primary break-all">{coupon.code}</span>
-                        <span className={`ml-2 px-2 py-0.5 rounded-full text-xs font-semibold ${coupon.is_active ? 'bg-green-600/20 text-green-400' : 'bg-red-600/20 text-red-400'}`}>
-                            {coupon.is_active ? 'Active' : 'Inactive'}
-                        </span>
-                    </div>
-                    <div className="space-x-1 flex-shrink-0 ml-4">
-                        <button onClick={() => onEdit(coupon)} className="p-2 text-text-secondary hover:text-brand"><PencilIcon className="w-4 h-4" /></button>
-                        <button onClick={() => onDelete(coupon.id)} className="p-2 text-text-secondary hover:text-red-500"><TrashIcon className="w-4 h-4" /></button>
-                    </div>
-                </div>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-text-secondary">
-                    <div><strong className="text-text-primary">Discount:</strong> {discount}</div>
-                    <div><strong className="text-text-primary">Usage:</strong> {usage}</div>
-                    <div className="capitalize"><strong className="text-text-primary">Plan:</strong> {planName}</div>
-                    <div><strong className="text-text-primary">Expires:</strong> {expires}</div>
-                </div>
-            </div>
-
-            {/* Desktop View */}
-            <div className="hidden md:block font-mono text-brand font-semibold">{coupon.code}</div>
-            <div className="hidden md:block">{discount}</div>
-            <div className="hidden md:block capitalize">{planName}</div>
-            <div className="hidden md:block">{usage}</div>
-            <div className="hidden md:block">{expires}</div>
-            <div className="hidden md:block">
-                <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${coupon.is_active ? 'bg-green-600/20 text-green-400' : 'bg-red-600/20 text-red-400'}`}>
-                    {coupon.is_active ? 'Active' : 'Inactive'}
-                </span>
-            </div>
-            <div className="hidden md:flex justify-end space-x-2">
-                <button onClick={() => onEdit(coupon)} className="p-2 text-text-secondary hover:text-brand"><PencilIcon className="w-4 h-4" /></button>
-                <button onClick={() => onDelete(coupon.id)} className="p-2 text-text-secondary hover:text-red-500"><TrashIcon className="w-4 h-4" /></button>
-            </div>
-        </div>
-    );
-};
-
-const CouponForm: React.FC<{
-    plans: Plan[];
-    coupon: Coupon | null;
-    onSave: (data: any) => Promise<void>;
-    onCancel: () => void;
-}> = ({ plans, coupon, onSave, onCancel }) => {
-    const [code, setCode] = useState('');
-    const [discountType, setDiscountType] = useState<'percentage' | 'fixed_amount'>('percentage');
-    const [discountValue, setDiscountValue] = useState('');
-    const [expiresAt, setExpiresAt] = useState('');
-    const [usageLimit, setUsageLimit] = useState('');
-    const [applicablePlanId, setApplicablePlanId] = useState<string>('');
-    const [isActive, setIsActive] = useState(true);
-
-    useEffect(() => {
-        if (coupon) {
-            setCode(coupon.code);
-            setDiscountType(coupon.discount_type);
-            setDiscountValue(String(coupon.discount_value));
-            setExpiresAt(coupon.expires_at ? coupon.expires_at.substring(0, 10) : '');
-            setUsageLimit(coupon.usage_limit ? String(coupon.usage_limit) : '');
-            setApplicablePlanId(coupon.applicable_plan_id ? String(coupon.applicable_plan_id) : '');
-            setIsActive(coupon.is_active);
-        } else {
-             // Reset form for 'new'
-            setCode(Math.random().toString(36).substring(2, 10).toUpperCase());
-            setDiscountType('percentage');
-            setDiscountValue('');
-            setExpiresAt('');
-            setUsageLimit('');
-            setApplicablePlanId('');
-            setIsActive(true);
-        }
-    }, [coupon]);
-
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        const couponData = {
-            code,
-            discount_type: discountType,
-            discount_value: Number(discountValue),
-            expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
-            usage_limit: usageLimit ? Number(usageLimit) : null,
-            applicable_plan_id: applicablePlanId ? Number(applicablePlanId) : null,
-            is_active: isActive
-        };
-        onSave(couponData);
-    };
-
-    return (
-        <form onSubmit={handleSubmit} className="p-4 bg-background border border-border rounded-lg space-y-4 animate-fade-in">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <input type="text" placeholder="Coupon Code" value={code} onChange={e => setCode(e.target.value.toUpperCase())} required className="p-2 bg-panel-light border border-border rounded" />
-                <select value={discountType} onChange={e => setDiscountType(e.target.value as any)} className="p-2 bg-panel-light border border-border rounded">
-                    <option value="percentage">Percentage</option>
-                    <option value="fixed_amount">Fixed Amount</option>
-                </select>
-                <input type="number" placeholder="Discount Value" value={discountValue} onChange={e => setDiscountValue(e.target.value)} required className="p-2 bg-panel-light border border-border rounded" />
-                <input type="date" placeholder="Expiration Date" value={expiresAt} onChange={e => setExpiresAt(e.target.value)} className="p-2 bg-panel-light border border-border rounded" />
-                <input type="number" placeholder="Usage Limit (optional)" value={usageLimit} onChange={e => setUsageLimit(e.target.value)} className="p-2 bg-panel-light border border-border rounded" />
-                <select value={applicablePlanId} onChange={e => setApplicablePlanId(e.target.value)} className="p-2 bg-panel-light border border-border rounded">
-                    <option value="">All Plans</option>
-                    {plans.filter(p => p.name !== 'free').map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-            </div>
-             <div className="flex items-center gap-2">
-                <input type="checkbox" id="is-active-check" checked={isActive} onChange={e => setIsActive(e.target.checked)} className="w-4 h-4 bg-background border-border rounded text-brand focus:ring-brand"/>
-                <label htmlFor="is-active-check" className="text-sm text-text-secondary">Coupon is Active</label>
-            </div>
-            <div className="flex justify-end gap-2">
-                <button type="button" onClick={onCancel} className="px-4 py-2 bg-panel-light text-text-primary font-semibold rounded-lg hover:bg-border">Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700">{coupon ? 'Save Changes' : 'Create Coupon'}</button>
-            </div>
-        </form>
-    );
-};
-
 
 export default AdminPanel;

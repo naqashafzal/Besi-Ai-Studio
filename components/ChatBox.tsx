@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage, UserProfile } from '../types';
 import { XMarkIcon, PaperAirplaneIcon, SparklesIcon } from './Icons';
@@ -11,10 +10,9 @@ interface ChatBoxProps {
     profile: UserProfile;
     onClose: () => void;
     onSendMessage: (message: string) => void;
-    chatCreditCost: number;
 }
 
-const ChatBox: React.FC<ChatBoxProps> = ({ messages, isLoading, error, profile, onClose, onSendMessage, chatCreditCost }) => {
+const ChatBox: React.FC<ChatBoxProps> = ({ messages, isLoading, error, profile, onClose, onSendMessage }) => {
     const [input, setInput] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -24,13 +22,13 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, isLoading, error, profile, 
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (input.trim() && !isLoading && profile.credits >= chatCreditCost) {
+        if (input.trim() && !isLoading && profile.credits > 0) {
             onSendMessage(input);
             setInput('');
         }
     };
 
-    const hasEnoughCredits = profile.credits >= chatCreditCost;
+    const hasEnoughCredits = profile.credits > 0;
 
     return (
         <div className="fixed bottom-24 right-6 w-[90vw] max-w-md h-[70vh] max-h-[600px] z-50 flex flex-col animate-fade-in">
@@ -96,7 +94,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, isLoading, error, profile, 
                             <PaperAirplaneIcon className="w-6 h-6" />
                         </button>
                     </form>
-                     <p className="text-xs text-text-tertiary text-center mt-2">Each message costs {chatCreditCost} credit{chatCreditCost > 1 ? 's' : ''}.</p>
+                     <p className="text-xs text-text-tertiary text-center mt-2">Each message costs 1 credit.</p>
                 </div>
             </div>
         </div>

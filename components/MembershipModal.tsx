@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+
+
+import React, { useMemo } from 'react';
 import { XMarkIcon, StarIcon, SparklesIcon } from './Icons';
-import { Plan, PaymentSettings, UserProfile } from '../types';
-import { validateCoupon } from '../services/adminService';
+import { Plan, PaymentSettings, UserProfile, PlanCountryPrice } from '../types';
 
 interface MembershipModalProps {
   plan: Plan;
@@ -10,19 +11,30 @@ interface MembershipModalProps {
   country?: string | null;
   paymentSettings: PaymentSettings | null;
   profile: UserProfile | null;
+  planCountryPrices: PlanCountryPrice[];
 }
 
-const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgrade, country, paymentSettings, profile }) => {
-    const [isUpgrading, setIsUpgrading] = useState(false);
-    const [couponCode, setCouponCode] = useState('');
-    const [appliedDiscount, setAppliedDiscount] = useState<{ value: number; type: string } | null>(null);
-    const [couponMessage, setCouponMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-    const [isApplying, setIsApplying] = useState(false);
-    const [showCouponInput, setShowCouponInput] = useState(false);
+const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgrade, country, paymentSettings, profile, planCountryPrices }) => {
+    const [isUpgrading, setIsUpgrading] = React.useState(false);
+    
+    const displayedPlan = useMemo(() => {
+        const planWithCurrency = { ...plan, currency: 'USD' };
+        if (plan.price === 0) {
+            return planWithCurrency;
+        }
+        const countryPrice = planCountryPrices.find(p => p.plan_id === plan.id && p.country === country);
+        if (countryPrice) {
+            return {
+                ...plan,
+                price: countryPrice.price,
+                currency: countryPrice.currency,
+            };
+        }
+        return planWithCurrency;
+    }, [plan, country, planCountryPrices]);
 
     const isPakistan = country === 'Pakistan';
     const canPayManually = isPakistan && !!paymentSettings?.manual_payment_instructions_pk;
-    const canPayWithPayPal = !!paymentSettings?.paypal_client_id;
     const isAdmin = profile?.role === 'admin';
 
     const handleUpgradeClick = async () => {
@@ -33,39 +45,6 @@ const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgr
             setIsUpgrading(false);
         }
     };
-
-    const handleApplyCoupon = async () => {
-        if (!couponCode.trim()) return;
-        setIsApplying(true);
-        setCouponMessage(null);
-        try {
-            const result = await validateCoupon(couponCode, plan.id);
-            if (result.isValid && result.discountValue && result.discountType) {
-                setAppliedDiscount({ value: result.discountValue, type: result.discountType });
-                setCouponMessage({ text: result.message, type: 'success' });
-            } else {
-                setAppliedDiscount(null);
-                setCouponMessage({ text: result.message, type: 'error' });
-            }
-        } catch (err) {
-            setAppliedDiscount(null);
-            setCouponMessage({ text: "An unexpected error occurred.", type: 'error' });
-        } finally {
-            setIsApplying(false);
-        }
-    };
-
-    const finalPrice = useMemo(() => {
-        if (!appliedDiscount) return plan.price;
-        if (appliedDiscount.type === 'percentage') {
-            return plan.price * (1 - appliedDiscount.value / 100);
-        }
-        if (appliedDiscount.type === 'fixed_amount') {
-            return Math.max(0, plan.price - appliedDiscount.value);
-        }
-        return plan.price;
-    }, [plan.price, appliedDiscount]);
-
 
     const renderPaymentAction = () => {
         const manualPaymentJSX = canPayManually && (
@@ -86,15 +65,25 @@ const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgr
             </>
         );
 
-        const paypalPaymentJSX = canPayWithPayPal && (
-            <button
-                // NOTE: Full PayPal integration is a separate task. This is a placeholder.
-                onClick={() => alert("Redirecting to PayPal...")}
-                className="w-full flex items-center justify-center py-3 px-4 bg-[#0070BA] text-white font-bold rounded-lg shadow-lg hover:bg-[#005ea6] transition-colors duration-300"
-            >
-                <svg className="w-6 h-6 mr-2" viewBox="0 0 24 24" fill="currentColor"><path d="M7.348 3.5h9.304c.81 0 1.52.563 1.695 1.352l2.362 10.93c.12 1.05-.9 1.718-1.71 1.718h-4.27c-.84 0-1.583.563-1.737 1.352l-.42 2.36c-.155.79-.81 1.352-1.668 1.352h-2.1c-.555 0-1.02-.375-1.14-.9L4.35 4.852C4.175 4.062 4.915 3.5 5.725 3.5h1.623zM16.8 6.26c-1.47 0-2.618 1.2-2.738 2.672-.142 1.74 1.2 3.188 2.952 3.188 1.71 0 2.95-1.448 3.095-3.188.142-1.47-1.02-2.672-2.768-2.672h-.54z"></path></svg>
-                Pay with PayPal
-            </button>
+        const paypalPaymentJSX = (
+            <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+                <input type="hidden" name="cmd" value="_xclick" />
+                <input type="hidden" name="business" value="haintsblue@gmail.com" />
+                <input type="hidden" name="item_name" value={`BestAI Pro Membership - User: ${profile?.email || profile?.id}`} />
+                <input type="hidden" name="amount" value={displayedPlan.price.toFixed(2)} />
+                <input type="hidden" name="currency_code" value={(displayedPlan as any).currency || 'USD'} />
+                <input type="hidden" name="return" value={`${window.location.origin}${window.location.pathname}?paypal_success=true&plan=pro`} />
+                <input type="hidden" name="cancel_return" value={`${window.location.origin}${window.location.pathname}`} />
+                <input type="hidden" name="custom" value={profile?.id || ''} />
+                
+                <button
+                    type="submit"
+                    className="w-full flex items-center justify-center py-3 px-4 bg-[#0070BA] text-white font-bold rounded-lg shadow-lg hover:bg-[#005ea6] transition-colors duration-300"
+                >
+                    <svg className="w-6 h-6 mr-2" viewBox="0 0 24 24" fill="currentColor"><path d="M7.348 3.5h9.304c.81 0 1.52.563 1.695 1.352l2.362 10.93c.12 1.05-.9 1.718-1.71 1.718h-4.27c-.84 0-1.583.563-1.737 1.352l-.42 2.36c-.155.79-.81 1.352-1.668 1.352h-2.1c-.555 0-1.02-.375-1.14-.9L4.35 4.852C4.175 4.062 4.915 3.5 5.725 3.5h1.623zM16.8 6.26c-1.47 0-2.618 1.2-2.738 2.672-.142 1.74 1.2 3.188 2.952 3.188 1.71 0 2.95-1.448 3.095-3.188.142-1.47-1.02-2.672-2.768-2.672h-.54z"></path></svg>
+                    Pay with PayPal
+                </button>
+            </form>
         );
 
         if (manualPaymentJSX && paypalPaymentJSX) {
@@ -174,40 +163,13 @@ const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgr
                 </div>
 
                  <div className="text-center">
-                    {appliedDiscount ? (
-                        <p className="text-4xl font-extrabold text-text-primary">
-                            <s className="text-2xl text-text-secondary">${plan.price.toFixed(2)}</s> ${finalPrice.toFixed(2)}
-                            <span className="text-lg font-medium text-text-secondary">/month</span>
-                        </p>
-                    ) : (
-                        <p className="text-4xl font-extrabold text-text-primary">${plan.price.toFixed(2)}<span className="text-lg font-medium text-text-secondary">/month</span></p>
-                    )}
+                    <p className="text-4xl font-extrabold text-text-primary">
+                        {(displayedPlan as any).currency === 'USD' ? '$' : ''}
+                        {displayedPlan.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {(displayedPlan as any).currency !== 'USD' ? ` ${(displayedPlan as any).currency}` : ''}
+                        <span className="text-lg font-medium text-text-secondary">/month</span>
+                    </p>
                  </div>
-                 
-                <div className="my-4">
-                    {!showCouponInput ? (
-                        <button onClick={() => setShowCouponInput(true)} className="text-sm text-brand hover:underline w-full text-center">
-                            Have a coupon code?
-                        </button>
-                    ) : (
-                        <div className="space-y-2 animate-fade-in">
-                            <div className="flex gap-2">
-                                <input
-                                    type="text"
-                                    value={couponCode}
-                                    onChange={e => setCouponCode(e.target.value.toUpperCase())}
-                                    placeholder="Enter coupon code"
-                                    className="w-full p-2 bg-background border border-border rounded-lg"
-                                    disabled={isApplying}
-                                />
-                                <button onClick={handleApplyCoupon} disabled={isApplying || !couponCode} className="px-4 py-2 bg-brand text-white font-semibold rounded-lg hover:bg-brand-hover disabled:opacity-50">
-                                    {isApplying ? '...' : 'Apply'}
-                                </button>
-                            </div>
-                            {couponMessage && <p className={`text-xs text-center ${couponMessage.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>{couponMessage.text}</p>}
-                        </div>
-                    )}
-                </div>
 
                  {renderPaymentAction()}
             </div>

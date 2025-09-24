@@ -15,7 +15,7 @@ export const fileToGenerativePart = (file: File): Promise<GenerativePart> => {
       }
     };
     reader.onerror = (error) => reject(error);
-// FIX: Corrected typo from readDataURL to readAsDataURL.
+    // FIX: Corrected typo from readDataURL to readAsDataURL.
     reader.readAsDataURL(file);
   });
 };
