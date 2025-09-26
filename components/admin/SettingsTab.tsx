@@ -219,16 +219,34 @@ const RegionalPricingManager: React.FC<RegionalPricingManagerProps> = ({ plans, 
                                 </div>
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-center text-sm">
-                               <div className="capitalize"><span className="md:hidden font-bold text-text-primary mr-2">Plan:</span> {getPlanName(p.plan_id)}</div>
-                               <div><span className="md:hidden font-bold text-text-primary mr-2">Country:</span> {p.country}</div>
-                               <div><span className="md:hidden font-bold text-text-primary mr-2">Price:</span> {p.price}</div>
-                               <div><span className="md:hidden font-bold text-text-primary mr-2">Currency:</span> {p.currency}</div>
-                               <div className="flex justify-end space-x-2">
-                                   <button onClick={() => handleEdit(p)} className="p-2 text-text-secondary hover:text-brand"><PencilIcon className="w-4 h-4" /></button>
-                                   <button onClick={() => handleDelete(p.id)} className="p-2 text-text-secondary hover:text-red-500"><TrashIcon className="w-4 h-4" /></button>
-                               </div>
-                            </div>
+                           <>
+                                {/* Desktop View */}
+                                <div className="hidden md:grid md:grid-cols-5 gap-3 items-center text-sm">
+                                    <div className="capitalize">{getPlanName(p.plan_id)}</div>
+                                    <div>{p.country}</div>
+                                    <div>{p.price}</div>
+                                    <div>{p.currency}</div>
+                                    <div className="flex justify-end space-x-2">
+                                        <button onClick={() => handleEdit(p)} className="p-2 text-text-secondary hover:text-brand"><PencilIcon className="w-4 h-4" /></button>
+                                        <button onClick={() => handleDelete(p.id)} className="p-2 text-text-secondary hover:text-red-500"><TrashIcon className="w-4 h-4" /></button>
+                                    </div>
+                                </div>
+                                {/* Mobile View */}
+                                <div className="md:hidden text-sm">
+                                    <div className="flex justify-between items-start">
+                                        <p className="font-bold text-text-primary">{p.country}</p>
+                                        <div className="flex flex-shrink-0 space-x-2">
+                                            <button onClick={() => handleEdit(p)} className="p-2 text-text-secondary hover:text-brand"><PencilIcon className="w-4 h-4" /></button>
+                                            <button onClick={() => handleDelete(p.id)} className="p-2 text-text-secondary hover:text-red-500"><TrashIcon className="w-4 h-4" /></button>
+                                        </div>
+                                    </div>
+                                    <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-text-secondary">
+                                        <span className="font-semibold">Plan:</span><span className="text-right capitalize">{getPlanName(p.plan_id)}</span>
+                                        <span className="font-semibold">Price:</span><span className="text-right">{p.price}</span>
+                                        <span className="font-semibold">Currency:</span><span className="text-right">{p.currency}</span>
+                                    </div>
+                                </div>
+                           </>
                         )}
                     </div>
                 ))}

@@ -1,6 +1,7 @@
 
 
 
+
 import React, { useMemo, useState } from 'react';
 import { XMarkIcon, StarIcon, SparklesIcon, TicketIcon } from './Icons';
 import { Plan, PaymentSettings, UserProfile, PlanCountryPrice, Coupon } from '../types';
@@ -112,10 +113,12 @@ const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgr
             </>
         );
 
-        const paypalPaymentJSX = (
+        const canPayWithPaypal = !!paymentSettings?.paypal_client_id;
+
+        const paypalPaymentJSX = canPayWithPaypal && (
             <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
                 <input type="hidden" name="cmd" value="_xclick" />
-                <input type="hidden" name="business" value="haintsblue@gmail.com" />
+                <input type="hidden" name="business" value={paymentSettings!.paypal_client_id!} />
                 <input type="hidden" name="item_name" value={`BestAI Pro Membership - User: ${profile?.email || profile?.id}`} />
                 <input type="hidden" name="amount" value={finalPrice.toFixed(2)} />
                 <input type="hidden" name="currency_code" value={(displayedPlan as any).currency || 'USD'} />

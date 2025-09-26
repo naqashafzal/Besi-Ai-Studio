@@ -76,7 +76,7 @@ app.use('/api-proxy', async (req, res, next) => {
     try {
         // Construct the target URL by taking the part of the path after /api-proxy/
         const targetPath = req.url.startsWith('/') ? req.url.substring(1) : req.url;
-        const apiUrl = `${externalApiBaseUrl}/${targetPath}`;
+        let apiUrl = `${externalApiBaseUrl}/${targetPath}`;
         console.log(`HTTP Proxy: Forwarding request to ${apiUrl}`);
 
         // Prepare headers for the outgoing request
@@ -89,8 +89,18 @@ app.use('/api-proxy', async (req, res, next) => {
             }
         }
 
-        // Set the actual API key in the appropriate header
-        outgoingHeaders['X-Goog-Api-Key'] = apiKey;
+        // Set the actual API key in the appropriate header or query param
+        // Video download URIs and some other file-based APIs need the key in the query string.
+        // Most other API calls need it in the header.
+        // A simple heuristic: if the path contains '/files/', it's likely a download.
+        if (targetPath.includes('/files/')) {
+            const url = new URL(apiUrl);
+            url.searchParams.append('key', apiKey);
+            apiUrl = url.toString();
+        } else {
+            outgoingHeaders['X-Goog-Api-Key'] = apiKey;
+        }
+
 
         // Set Content-Type from original request if present (for relevant methods)
         if (req.headers['content-type'] && ['POST', 'PUT', 'PATCH'].includes(req.method.toUpperCase())) {

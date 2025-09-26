@@ -87,36 +87,48 @@ const CouponManagementTab: React.FC<CouponManagementTabProps> = ({ coupons, onAd
                  <div>
                     {coupons.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map(coupon => (
                         <div key={coupon.id} className="p-4 border-b border-border last:border-b-0 hover:bg-panel-light/50">
-                             <div className="grid grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_auto] gap-x-4 gap-y-2 lg:items-center text-sm">
-                                <div className="col-span-2 lg:col-span-1">
-                                    <span className="font-mono text-base font-bold text-brand bg-brand/10 px-2 py-1 rounded">{coupon.code}</span>
+                            <div className="lg:grid lg:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_auto] lg:gap-4 lg:items-center text-sm">
+                                {/* Mobile View */}
+                                <div className="lg:hidden">
+                                    <div className="flex justify-between items-start">
+                                        <span className="font-mono text-base font-bold text-brand bg-brand/10 px-2 py-1 rounded">{coupon.code}</span>
+                                        <div className="flex flex-shrink-0 space-x-2">
+                                            <button onClick={() => handleEdit(coupon)} className="p-2 text-text-secondary hover:text-brand"><PencilIcon className="w-4 h-4" /></button>
+                                            <button onClick={() => handleDelete(coupon.id)} className="p-2 text-text-secondary hover:text-red-500"><TrashIcon className="w-4 h-4" /></button>
+                                        </div>
+                                    </div>
+                                    <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-text-secondary">
+                                        <span className="font-semibold">Discount:</span><span className="text-right font-semibold text-text-primary">{coupon.discount_type === 'percentage' ? `${coupon.discount_value}%` : `$${coupon.discount_value}`}</span>
+                                        <span className="font-semibold">Expires:</span><span className="text-right">{coupon.expires_at ? new Date(coupon.expires_at).toLocaleDateString() : 'Never'}</span>
+                                        <span className="font-semibold">Usage:</span><span className="text-right">{coupon.times_used} / {coupon.max_uses ?? '∞'}</span>
+                                        <span className="font-semibold">Active:</span>
+                                        <span className="text-right">
+                                            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${coupon.is_active ? 'bg-green-600/20 text-green-300' : 'bg-red-600/20 text-red-300'}`}>
+                                                {coupon.is_active ? 'Yes' : 'No'}
+                                            </span>
+                                        </span>
+                                        <span className="font-semibold">Created:</span><span className="text-right">{new Date(coupon.created_at).toLocaleDateString()}</span>
+                                    </div>
                                 </div>
-                                <div>
-                                    <strong className="lg:hidden text-text-primary mr-2">Discount:</strong>
-                                    {coupon.discount_type === 'percentage' ? `${coupon.discount_value}%` : `$${coupon.discount_value}`}
+                                
+                                {/* Desktop View */}
+                                <div className="hidden lg:contents">
+                                    <div><span className="font-mono text-base font-bold text-brand bg-brand/10 px-2 py-1 rounded">{coupon.code}</span></div>
+                                    <div>{coupon.discount_type === 'percentage' ? `${coupon.discount_value}%` : `$${coupon.discount_value}`}</div>
+                                    <div>{coupon.expires_at ? new Date(coupon.expires_at).toLocaleDateString() : 'Never'}</div>
+                                    <div>{coupon.times_used} / {coupon.max_uses ?? '∞'}</div>
+                                    <div>
+                                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${coupon.is_active ? 'bg-green-600/20 text-green-300' : 'bg-red-600/20 text-red-300'}`}>
+                                            {coupon.is_active ? 'Yes' : 'No'}
+                                        </span>
+                                    </div>
+                                    <div>{new Date(coupon.created_at).toLocaleDateString()}</div>
+                                    <div className="flex justify-end items-center space-x-2">
+                                        <button onClick={() => handleEdit(coupon)} className="p-2 text-text-secondary hover:text-brand"><PencilIcon className="w-4 h-4" /></button>
+                                        <button onClick={() => handleDelete(coupon.id)} className="p-2 text-text-secondary hover:text-red-500"><TrashIcon className="w-4 h-4" /></button>
+                                    </div>
                                 </div>
-                                 <div>
-                                    <strong className="lg:hidden text-text-primary mr-2">Expires:</strong>
-                                    {coupon.expires_at ? new Date(coupon.expires_at).toLocaleDateString() : 'Never'}
-                                 </div>
-                                 <div>
-                                    <strong className="lg:hidden text-text-primary mr-2">Usage:</strong>
-                                    {coupon.times_used} / {coupon.max_uses ?? '∞'}
-                                 </div>
-                                 <div>
-                                    <strong className="lg:hidden text-text-primary mr-2">Active:</strong>
-                                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${coupon.is_active ? 'bg-green-600/20 text-green-300' : 'bg-red-600/20 text-red-300'}`}>
-                                      {coupon.is_active ? 'Yes' : 'No'}
-                                    </span>
-                                 </div>
-                                 <div className="hidden lg:block">
-                                    {new Date(coupon.created_at).toLocaleDateString()}
-                                 </div>
-                                 <div className="col-span-2 lg:col-span-1 flex justify-end items-center space-x-2">
-                                    <button onClick={() => handleEdit(coupon)} className="p-2 text-text-secondary hover:text-brand"><PencilIcon className="w-4 h-4" /></button>
-                                    <button onClick={() => handleDelete(coupon.id)} className="p-2 text-text-secondary hover:text-red-500"><TrashIcon className="w-4 h-4" /></button>
-                                 </div>
-                             </div>
+                            </div>
                         </div>
                     ))}
                  </div>

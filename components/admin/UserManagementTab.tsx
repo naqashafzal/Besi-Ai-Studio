@@ -50,7 +50,7 @@ const UserManagementTab: React.FC<UserManagementTabProps> = ({ users, onUpdateUs
                 className="w-full max-w-md p-2 mb-6 bg-background border border-border rounded-lg"
             />
             <div className="border border-border rounded-lg overflow-x-auto">
-                <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_auto] gap-2 md:gap-4 p-3 bg-panel-light text-xs text-text-secondary uppercase tracking-wider font-bold min-w-[700px]">
+                <div className="hidden md:grid md:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_auto] gap-4 p-3 bg-panel-light text-xs text-text-secondary uppercase tracking-wider font-bold">
                     <div>Email</div>
                     <div>Phone</div>
                     <div>Country</div>
@@ -59,7 +59,7 @@ const UserManagementTab: React.FC<UserManagementTabProps> = ({ users, onUpdateUs
                     <div>Role</div>
                     <div className="text-right">Actions</div>
                 </div>
-                <div className="min-w-[700px]">
+                <div>
                     {filteredUsers.map(user => (
                         editingUser?.id === user.id 
                         ? <EditUserRow key={user.id} user={editingUser} onSave={handleSaveUser} onCancel={() => setEditingUser(null)} />
@@ -77,16 +77,37 @@ interface UserRowProps {
     onDelete: (user: UserProfile) => void | Promise<void>;
 }
 const UserRow: React.FC<UserRowProps> = ({ user, onEdit, onDelete }) => (
-    <div className="p-4 border-b border-border last:border-b-0 hover:bg-panel-light/50 grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_auto] gap-2 md:gap-4 items-center text-sm">
-        <div className="text-text-primary font-medium break-all">{user.email}</div>
-        <div className="text-text-secondary truncate">{user.phone ?? 'N/A'}</div>
-        <div className="text-text-secondary truncate">{user.country ?? 'N/A'}</div>
-        <div className="capitalize">{user.plan}</div>
-        <div>{user.credits}</div>
-        <div className="capitalize">{user.role}</div>
-        <div className="flex justify-end space-x-0 md:space-x-2">
-            <button onClick={() => onEdit(user)} className="p-1 md:p-2 text-text-secondary hover:text-brand" aria-label={`Edit user ${user.email}`}><PencilIcon className="w-4 h-4" /></button>
-            <button onClick={() => onDelete(user)} className="p-1 md:p-2 text-text-secondary hover:text-red-500" aria-label={`Delete user ${user.email}`}><TrashIcon className="w-4 h-4" /></button>
+    <div className="p-4 border-b border-border last:border-b-0 hover:bg-panel-light/50 text-sm">
+        {/* Desktop View */}
+        <div className="hidden md:grid md:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_auto] gap-4 items-center">
+            <div className="text-text-primary font-medium break-all">{user.email}</div>
+            <div className="text-text-secondary truncate">{user.phone ?? 'N/A'}</div>
+            <div className="text-text-secondary truncate">{user.country ?? 'N/A'}</div>
+            <div className="capitalize">{user.plan}</div>
+            <div>{user.credits}</div>
+            <div className="capitalize">{user.role}</div>
+            <div className="flex justify-end space-x-2">
+                <button onClick={() => onEdit(user)} className="p-2 text-text-secondary hover:text-brand" aria-label={`Edit user ${user.email}`}><PencilIcon className="w-4 h-4" /></button>
+                <button onClick={() => onDelete(user)} className="p-2 text-text-secondary hover:text-red-500" aria-label={`Delete user ${user.email}`}><TrashIcon className="w-4 h-4" /></button>
+            </div>
+        </div>
+
+        {/* Mobile View */}
+        <div className="md:hidden">
+            <div className="flex justify-between items-start">
+                <p className="font-bold text-text-primary break-all pr-4">{user.email}</p>
+                <div className="flex flex-shrink-0 space-x-2">
+                     <button onClick={() => onEdit(user)} className="p-2 text-text-secondary hover:text-brand" aria-label={`Edit user ${user.email}`}><PencilIcon className="w-4 h-4" /></button>
+                     <button onClick={() => onDelete(user)} className="p-2 text-text-secondary hover:text-red-500" aria-label={`Delete user ${user.email}`}><TrashIcon className="w-4 h-4" /></button>
+                </div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-text-secondary">
+                <span className="font-semibold">Phone:</span><span className="text-right truncate">{user.phone ?? 'N/A'}</span>
+                <span className="font-semibold">Country:</span><span className="text-right truncate">{user.country ?? 'N/A'}</span>
+                <span className="font-semibold">Plan:</span><span className="text-right capitalize">{user.plan}</span>
+                <span className="font-semibold">Credits:</span><span className="text-right">{user.credits}</span>
+                <span className="font-semibold">Role:</span><span className="text-right capitalize">{user.role}</span>
+            </div>
         </div>
     </div>
 );
@@ -109,7 +130,7 @@ const EditUserRow: React.FC<EditUserRowProps> = ({ user, onSave, onCancel }) => 
     };
 
     return (
-        <div className="p-4 bg-brand/10 border-b border-border last:border-b-0 space-y-4 min-w-[700px]">
+        <div className="p-4 bg-brand/10 border-b border-border last:border-b-0 space-y-4">
              <p className="font-bold text-text-primary md:hidden">{user.email}</p>
              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 <input type="text" value={phone} onChange={e => setPhone(e.target.value)} placeholder="Phone" className="bg-background border border-border rounded-md p-2 w-full" />

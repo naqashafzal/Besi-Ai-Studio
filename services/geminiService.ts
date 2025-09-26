@@ -19,6 +19,7 @@ export const createChat = (): Chat => {
 export const generatePromptFromImage = async (
     image: GenerativePart, 
     focus: {
+        pose: boolean;
         realism: boolean;
         style: boolean;
         background: boolean;
@@ -28,21 +29,29 @@ export const generatePromptFromImage = async (
     keywords: string
 ): Promise<string> => {
     try {
-        const systemInstruction = `You are a world-class AI prompt engineer, specializing in creating hyper-realistic and detailed prompts for advanced image generation models. Your task is to analyze a user-provided image and generate a new, masterfully crafted prompt that describes a scene based on that image and the user's focus points.
+        const systemInstruction = `You are a world-class AI prompt engineer with an expert eye for visual detail. Your sole task is to meticulously analyze a user-provided image and generate a masterfully crafted, highly detailed prompt that describes the image with extreme precision. The generated prompt should allow another AI to recreate the image as closely as possible, focusing on photorealism and accuracy.
 
 **Core Principles:**
-1.  **Photorealism is Key:** Every prompt must aim for the highest degree of realism. Describe textures, materials, subtle imperfections, and how light interacts with surfaces.
-2.  **Structured Output:** Follow this strict format: [Subject/Action], [Attire], [Setting/Background], [Lighting], [Camera/Composition], [Style/Mood].
-3.  **Focus on Transformation, Not Duplication:** You are describing a *new scene* inspired by the image, not just listing what's in it.
-4.  **NEVER Describe Identity:** Do not mention the person's physical characteristics (age, race, gender, specific facial features). The prompt's primary function is to build a world *around* the person from the photo.
-5.  **Mandatory Subject Instruction:** Every prompt MUST include an explicit instruction to use the person from the uploaded base photo. The instruction MUST state to "strictly use the face, expression, and all facial details from the uploaded base photo." This is the most critical rule.
+1.  **Strict Description, Not Interpretation:** Your goal is to describe what is present in the image, not to interpret or transform it. Generate a prompt that serves as a blueprint for recreating the original image.
+2.  **Exact Replication of Elements:** You MUST analyze and precisely describe the following key elements from the source image. Be specific and detailed.
+    *   **Pose:** The subject's exact posture, body language, facial expression, and action.
+    *   **Style:** The exact mood, genre, and aesthetic (e.g., cinematic, vintage, professional headshot).
+    *   **Clothing & Attire:** The exact type, style, color, texture of the clothing, and any accessories.
+    *   **Environment & Background:** The setting, background details, dominant shapes, and overall composition.
+    *   **Lighting:** The precise quality, direction, and color of the light (e.g., soft studio light, hard side light, golden hour sunlight).
+    *   **Camera & Composition:** The camera angle, shot type (e.g., close-up, medium shot, full-body shot), lens characteristics (e.g., shallow depth of field, wide-angle), and overall framing.
+3.  **Photorealism is Paramount:** Every part of the prompt must aim for the highest degree of realism. Describe textures, materials, subtle imperfections, and how light interacts with surfaces.
+4.  **Structured Output:** Follow this strict format for your output: \`[Subject/Action including Pose], [Attire/Clothing & Key Elements], [Setting/Environment & Background], [Lighting], [Camera/Composition], [Style/Mood].\`
+5.  **NEVER Describe Identity or Facial Features:** You must NOT mention the person's physical characteristics. This includes age, race, gender, specific facial features like eye color, hair style, or any facial hair like beards or mustaches. The prompt builds a world *around* the person, relying entirely on the base photo for all facial information.
+6.  **Mandatory Subject Instruction:** Every prompt MUST include the explicit instruction: "strictly use the face, expression, and all facial details from the uploaded base photo." This is the most critical rule.
 
 **Example of High-Quality Output:**
-"A professional corporate headshot of a person, where you must strictly use the face, expression, and all facial details from the uploaded base photo. They are wearing a sharp, dark navy suit with a crisp white shirt. The background is a modern, softly blurred office environment with architectural lines and hints of natural light. The lighting is a soft, diffused three-point studio setup, creating a gentle key light on the face and eliminating harsh shadows. Close-up shot, captured with a DSLR and an 85mm f/1.4 lens, resulting in a shallow depth of field. The style is professional, confident, and clean."`;
+"A professional corporate headshot of a person, where you must strictly use the face, expression, and all facial details from the uploaded base photo. The subject is posed with a confident, slight lean forward, head turned slightly to the left. They are wearing a sharp, dark navy suit with a crisp white shirt. The background is a modern, softly blurred office environment with strong vertical architectural lines. The lighting is a soft, diffused three-point studio setup, creating a gentle key light on the face. Close-up shot, captured with an 85mm lens at f/1.4, resulting in a shallow depth of field. The style is professional, confident, and clean."`;
 
         let userInstruction = "Generate a new prompt based on the image provided.";
 
         const focusMapping = {
+            pose: "the subject's pose and action",
             realism: "photorealistic details, textures, and imperfections",
             style: "the overall style and mood",
             background: "the background and setting",
@@ -93,17 +102,28 @@ export const generateImage = async (
     prompt: string, 
     baseImage: GenerativePart,
     imageSize: '1024' | '2048' = '1024',
-    aspectRatio: '1:1' | '16:9' | '9:16' | '4:3' | '3:4' = '1:1'
+    aspectRatio: '1:1' | '16:9' | '9:16' | '4:3' | '3:4' = '1:1',
+    fidelity: 'creative' | 'fidelity' = 'creative',
+    useCannyEdges: boolean = false
 ): Promise<string[]> => {
     try {
-        let finalPrompt = prompt;
-        if (imageSize === '2048') {
-            finalPrompt = `${prompt}, high resolution, 4K, ultra-detailed, 2048x2048 pixels`;
+        let finalPrompt = '';
+        const facialInstruction = "It is absolutely critical that you strictly use the face, expression, and all facial details from the uploaded base photo. Do not alter the subject's age, race, gender, or any physical characteristics. The original person must be perfectly preserved.";
+
+        if (useCannyEdges) {
+            finalPrompt = `INSTRUCTION: This is a high-priority Canny Edges task. You MUST apply Canny edge detection to the base photo to create a precise edge map. This edge map is a strict boundary. Your task is to use this map to perfectly and unalterably preserve the exact pose, composition, shape, and all structural details of the subject and their clothing. You are only permitted to change the style and texture as described in the user's prompt, rendered *within* these locked Canny edges. Any deviation from the edge map is a failure. ${facialInstruction}\nUSER PROMPT: "${prompt}"`;
+        } else if (fidelity === 'creative') {
+            finalPrompt = `INSTRUCTION: Creatively transform the provided image based on the user's prompt. ${facialInstruction}\nUSER PROMPT: "${prompt}"`;
+        } else { // fidelity mode
+            finalPrompt = `INSTRUCTION: Your highest priority is to maintain absolute fidelity to the provided base photo. You must EXACTLY replicate the pose, body shape, lighting, style, composition, and camera distance. The user's prompt should be interpreted as a minor stylistic adjustment or element addition ONLY. Do not change the core essence of the image. ${facialInstruction}\nUSER EDIT: "${prompt}"`;
         }
 
-        // Add aspect ratio instruction if not default, as this model doesn't have a direct parameter.
         if (aspectRatio !== '1:1') {
-            finalPrompt = `${finalPrompt}. The final image must have a ${aspectRatio} aspect ratio.`;
+            finalPrompt += `\nASPECT RATIO: ${aspectRatio}`;
+        }
+
+        if (imageSize === '2048') {
+            finalPrompt += `\nQUALITY: High resolution, 4K, ultra-detailed, 2048x2048 pixels.`;
         }
 
 
@@ -163,14 +183,15 @@ export const generateMultiPersonImage = async (
     aspectRatio: '1:1' | '16:9' | '9:16' | '4:3' | '3:4' = '1:1'
 ): Promise<string[]> => {
     try {
-        let finalPrompt = `Using the two people from the two separate uploaded images, place them together in a new scene. The scene should be: "${prompt}". The final image must be a cohesive single scene.`;
-
-        if (imageSize === '2048') {
-            finalPrompt = `${finalPrompt}, high resolution, 4K, ultra-detailed, 2048x2048 pixels`;
-        }
+        const facialInstruction = "It is absolutely critical that you strictly use the face, expression, and all facial details of BOTH people from their respective base photos. Do not alter their age, race, gender, or any physical characteristics. The original people must be perfectly preserved.";
+        let finalPrompt = `INSTRUCTION: Combine the two people from the two separate uploaded images into one cohesive scene described by the user prompt. ${facialInstruction}\nUSER PROMPT: "${prompt}"`;
 
         if (aspectRatio !== '1:1') {
-            finalPrompt = `${finalPrompt}. The final image must have a ${aspectRatio} aspect ratio.`;
+            finalPrompt += `\nASPECT RATIO: ${aspectRatio}`;
+        }
+
+        if (imageSize === '2048') {
+            finalPrompt += `\nQUALITY: High resolution, 4K, ultra-detailed, 2048x2048 pixels.`;
         }
 
         const parts = [
@@ -226,9 +247,22 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 // Generates a video from a text prompt and an optional image
 export const generateVideo = async (
     prompt: string, 
-    baseImage: GenerativePart | null
+    baseImage: GenerativePart | null,
+    aspectRatio: '16:9' | '9:16' | '1:1',
+    motionLevel: number,
+    seed: number
 ): Promise<string> => {
     try {
+        const videoConfig: any = {
+            numberOfVideos: 1,
+            aspectRatio: aspectRatio,
+            motionLevel: motionLevel,
+        };
+
+        if (seed > 0) {
+            videoConfig.seed = seed;
+        }
+
         let operation;
         if (baseImage) {
             operation = await ai.models.generateVideos({
@@ -238,17 +272,13 @@ export const generateVideo = async (
                     imageBytes: baseImage.data,
                     mimeType: baseImage.mimeType,
                 },
-                config: {
-                    numberOfVideos: 1
-                }
+                config: videoConfig
             });
         } else {
             operation = await ai.models.generateVideos({
                 model: 'veo-2.0-generate-001',
                 prompt: prompt,
-                config: {
-                    numberOfVideos: 1
-                }
+                config: videoConfig
             });
         }
 
@@ -257,13 +287,31 @@ export const generateVideo = async (
             operation = await ai.operations.getVideosOperation({ operation: operation });
         }
 
+        if (operation.error) {
+            console.error("Video generation operation failed:", operation.error);
+            throw new Error(operation.error.message || `Video generation failed with code ${operation.error.code}.`);
+        }
+
         const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
         
         if (!downloadLink) {
+            console.error("Video generation completed without a download link. Full operation object:", JSON.stringify(operation, null, 2));
             throw new Error("Video generation completed, but no video was returned from the model.");
         }
         
-        return downloadLink;
+        // The service worker will intercept this fetch and route it through our proxy.
+        // The proxy will add the API key.
+        const response = await fetch(downloadLink);
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Failed to download video file. Server responded with ${response.status}: ${errorText}`);
+        }
+
+        const videoBlob = await response.blob();
+        // Create a local URL for the video blob to be used in the <video> tag.
+        const blobUrl = URL.createObjectURL(videoBlob);
+        
+        return blobUrl;
 
     } catch (error) {
         console.error("Error generating video:", error);

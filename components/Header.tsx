@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { Session, UserProfile, VisitorProfile, Plan } from '../types';
 import { supabase } from '../services/supabaseClient';
@@ -30,7 +31,7 @@ const Header: React.FC<HeaderProps> = ({
       if (profile) {
         // Logged in and profile loaded
         return (
-          <div className="flex-shrink-0 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-panel p-3 rounded-lg border border-border self-center text-center sm:text-left animate-fade-in">
+          <div className="flex-shrink-0 flex flex-col sm:flex-row items-stretch sm:items-center gap-4 sm:gap-2 bg-panel p-3 rounded-lg border border-border self-center text-center sm:text-left animate-fade-in">
             <div className="flex items-center justify-center sm:justify-start gap-3 px-2">
               <CreditIcon className="w-8 h-8 text-brand-secondary" />
               <div>
@@ -126,7 +127,7 @@ const Header: React.FC<HeaderProps> = ({
             <img 
                 src="https://zsdecor.pk/wp-content/uploads/2025/09/1.png" 
                 alt="BestAI Logo" 
-                className="h-16 w-auto"
+                className="h-12 sm:h-16 w-auto"
             />
             <p className="mt-1 text-lg text-brand font-medium">Portrait Generator</p>
         </div>

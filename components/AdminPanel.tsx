@@ -7,8 +7,9 @@ import PromptManagementTab from './admin/PromptManagementTab';
 import SettingsTab from './admin/SettingsTab';
 import PaymentSettingsTab from './admin/PaymentSettingsTab';
 import CouponManagementTab from './admin/CouponManagementTab';
+import ManualPaymentTab from './admin/ManualPaymentTab';
 
-type AdminTab = 'users' | 'prompts' | 'settings' | 'payments' | 'coupons';
+type AdminTab = 'users' | 'prompts' | 'settings' | 'payments' | 'manual_payments' | 'coupons';
 
 interface AdminPanelProps {
   allUsers: UserProfile[];
@@ -76,6 +77,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
             <TabButton name="Prompts" tab="prompts" activeTab={activeTab} onClick={setActiveTab} />
             <TabButton name="Settings" tab="settings" activeTab={activeTab} onClick={setActiveTab} />
             <TabButton name="Payments" tab="payments" activeTab={activeTab} onClick={setActiveTab} />
+            <TabButton name="Manual Payments" tab="manual_payments" activeTab={activeTab} onClick={setActiveTab} />
             <TabButton name="Coupons" tab="coupons" activeTab={activeTab} onClick={setActiveTab} />
         </div>
 
@@ -91,6 +93,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                                             onDeletePlanCountryPrice={onDeletePlanCountryPrice}
                                         />}
           {activeTab === 'payments' && <PaymentSettingsTab settings={paymentSettings} onUpdateSettings={onUpdatePaymentSettings} />}
+          {activeTab === 'manual_payments' && <ManualPaymentTab users={allUsers} />}
           {activeTab === 'coupons' && <CouponManagementTab 
                                             coupons={coupons}
                                             onAddCoupon={onAddCoupon}

@@ -47,7 +47,8 @@ const PromptManagementTab: React.FC<PromptManagementTabProps> = ({ prompts, onAd
         const imagePart = await fileToGenerativePart(newPromptImageFile);
         const generatedPrompt = await generatePromptFromImage(
             imagePart, 
-            { realism: true, style: true, background: true, clothing: false, lighting: false }, 
+            // FIX: Added missing 'pose' property to satisfy the function's type requirement.
+            { pose: true, realism: true, style: true, background: true, clothing: false, lighting: false }, 
             ''
         );
         setNewPromptText(generatedPrompt);

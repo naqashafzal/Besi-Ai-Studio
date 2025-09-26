@@ -7,7 +7,7 @@ import * as adminService from './services/adminService';
 import * as couponService from './services/couponService';
 import { supabase } from './services/supabaseClient';
 import { DEFAULT_PLANS, VIDEO_LOADING_MESSAGES } from './constants';
-import { SparklesIcon, PhotoIcon, UsersIcon, StarIcon, MailIcon, XMarkIcon, ChatBubbleLeftRightIcon, VideoCameraIcon } from './components/Icons';
+import { SparklesIcon, PhotoIcon, UsersIcon, StarIcon, MailIcon, XMarkIcon, ChatBubbleLeftRightIcon, VideoCameraIcon, RefreshIcon } from './components/Icons';
 import LoadingIndicator from './components/LoadingIndicator';
 import ImageDisplay from './components/ImageDisplay';
 import ImageUploader from './components/ImageUploader';
@@ -46,6 +46,8 @@ const App: React.FC = () => {
 
   // Generation Mode
   const [generationMode, setGenerationMode] = useState<'single' | 'multi' | 'video'>('single');
+  const [generationFidelity, setGenerationFidelity] = useState<'creative' | 'fidelity'>('creative');
+  const [useCannyEdges, setUseCannyEdges] = useState<boolean>(false);
   
   // Image states
   const [uploadedImage, setUploadedImage] = useState<File | null>(null);
@@ -54,18 +56,27 @@ const App: React.FC = () => {
   const [imageDataUrlTwo, setImageDataUrlTwo] = useState<string | null>(null);
   const [imageSize, setImageSize] = useState<'1024' | '2048'>('1024');
   const [aspectRatio, setAspectRatio] = useState<'1:1' | '16:9' | '9:16' | '4:3' | '3:4'>('1:1');
+
+  // Video states
+  const [videoAspectRatio, setVideoAspectRatio] = useState<'16:9' | '9:16' | '1:1'>('16:9');
+  const [videoMotionLevel, setVideoMotionLevel] = useState<number>(5);
+  const [videoSeed, setVideoSeed] = useState<number>(0);
   
   // "Photo to Prompt" feature states
   const [promptGenImage, setPromptGenImage] = useState<File | null>(null);
   const [promptGenImageDataUrl, setPromptGenImageDataUrl] = useState<string | null>(null);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [promptFocus, setPromptFocus] = useState({
+    pose: true,
     realism: true,
     style: true,
     background: true,
-    clothing: false,
-    lighting: false,
+    clothing: true,
+    lighting: true,
   });
+  const allPromptFocusSelected = Object.values(promptFocus).every(Boolean);
+  const somePromptFocusSelected = Object.values(promptFocus).some(Boolean) && !allPromptFocusSelected;
+
   const [promptKeywords, setPromptKeywords] = useState('');
 
 
@@ -242,7 +253,8 @@ const App: React.FC = () => {
                 }
 
                 const baseImagePart = await fileToGenerativePart(uploadedImage);
-                const imageUrls = await generateImage(prompt, baseImagePart, imageSize, aspectRatio);
+                // Visitors only get creative mode and standard options
+                const imageUrls = await generateImage(prompt, baseImagePart, '1024', '1:1', 'creative');
                 setGeneratedImageUrls(imageUrls);
                 setGenerationState(GenerationState.SUCCESS);
                 setHistoryImageUrls(prev => [...imageUrls, ...prev]);
@@ -273,7 +285,7 @@ const App: React.FC = () => {
     };
 
     processQueue();
-  }, [queue, isSystemBusy, visitorId, uploadedImage, prompt, visitorProfile, imageSize, aspectRatio, deductCredits]);
+  }, [queue, isSystemBusy, visitorId, uploadedImage, prompt, visitorProfile, deductCredits]);
 
 
   // Fetch Plans & Settings Effect
@@ -407,7 +419,7 @@ const App: React.FC = () => {
 
     if (!canUsePro) {
         if (aspectRatio !== '1:1') setAspectRatio('1:1');
-        if (imageSize !== '2048') setImageSize('1024');
+        if (imageSize !== '1024') setImageSize('1024');
     }
 
     if (!canUseAdmin && generationMode === 'video') {
@@ -571,6 +583,26 @@ const App: React.FC = () => {
       setPromptGenImageDataUrl(null);
     }
   };
+  
+  const selectAllPromptFocusRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (selectAllPromptFocusRef.current) {
+        selectAllPromptFocusRef.current.checked = allPromptFocusSelected;
+        selectAllPromptFocusRef.current.indeterminate = somePromptFocusSelected;
+    }
+  }, [allPromptFocusSelected, somePromptFocusSelected]);
+  
+  const handleSelectAllPromptFocus = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const isChecked = e.target.checked;
+    setPromptFocus({
+        pose: isChecked,
+        realism: isChecked,
+        style: isChecked,
+        background: isChecked,
+        clothing: isChecked,
+        lighting: isChecked,
+    });
+  };
 
   const currentCredits = session ? profile?.credits : visitorProfile?.credits;
   
@@ -625,7 +657,7 @@ const App: React.FC = () => {
         setGeneratedImageUrls(null);
         try {
           const baseImagePart = await fileToGenerativePart(uploadedImage);
-          const imageUrls = await generateImage(prompt, baseImagePart, imageSize, aspectRatio);
+          const imageUrls = await generateImage(prompt, baseImagePart, imageSize, aspectRatio, generationFidelity, useCannyEdges);
           
           setGeneratedImageUrls(imageUrls);
           setGenerationState(GenerationState.SUCCESS);
@@ -652,7 +684,7 @@ const App: React.FC = () => {
             setGenerationState(GenerationState.QUEUED);
         }
     }
-  }, [prompt, uploadedImage, session, profile, visitorProfile, queue, visitorId, imageSize, aspectRatio, deductCredits]);
+  }, [prompt, uploadedImage, session, profile, visitorProfile, queue, visitorId, imageSize, aspectRatio, deductCredits, generationFidelity, useCannyEdges]);
 
   const handleGenerateMultiPersonImage = useCallback(async () => {
     if (!session) {
@@ -728,7 +760,7 @@ const App: React.FC = () => {
     try {
         const baseImagePart = uploadedImage ? await fileToGenerativePart(uploadedImage) : null;
         
-        const downloadLink = await generateVideo(prompt, baseImagePart);
+        const downloadLink = await generateVideo(prompt, baseImagePart, videoAspectRatio, videoMotionLevel, videoSeed);
         
         setGeneratedVideoUrl(downloadLink); // Pass the direct URL
         
@@ -740,7 +772,7 @@ const App: React.FC = () => {
         updateUserCredits((profile?.credits ?? 0) + VIDEO_CREDIT_COST);
     }
 
-  }, [prompt, uploadedImage, session, profile, generatedVideoUrl, handleModeChange, deductCredits]);
+  }, [prompt, uploadedImage, session, profile, generatedVideoUrl, handleModeChange, deductCredits, videoAspectRatio, videoMotionLevel, videoSeed]);
   
   const handleLeaveQueue = () => {
     setQueue(q => q.filter(id => id !== visitorId));
@@ -1181,10 +1213,22 @@ const App: React.FC = () => {
                             <p className="text-sm font-semibold text-text-secondary">Advanced Options</p>
                             <div>
                                 <label className="text-xs text-text-secondary font-medium">Describe these elements:</label>
-                                <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-1">
+                                <div className="flex items-center gap-2 mt-1 mb-2">
+                                     <input
+                                        type="checkbox"
+                                        id="focus-all"
+                                        ref={selectAllPromptFocusRef}
+                                        checked={allPromptFocusSelected}
+                                        onChange={handleSelectAllPromptFocus}
+                                        className="w-4 h-4 bg-background border-border rounded text-brand focus:ring-brand focus:ring-2 disabled:opacity-50"
+                                        disabled={isGenerating || isQueued || isGeneratingPrompt}
+                                     />
+                                     <label htmlFor="focus-all" className="text-sm font-bold text-text-secondary select-none cursor-pointer">Select All</label>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 mt-1">
                                     {Object.keys(promptFocus).map((key) => {
                                         const focusKey = key as keyof typeof promptFocus;
-                                        const label = { realism: 'Realism & Detail', style: 'Style & Mood', background: 'Background & Setting', clothing: 'Clothing & Attire', lighting: 'Lighting Details' }[focusKey];
+                                        const label = { pose: 'Pose & Action', realism: 'Realism & Detail', style: 'Style & Mood', background: 'Background & Setting', clothing: 'Clothing & Attire', lighting: 'Lighting Details' }[focusKey];
                                         return (
                                             <div key={key} className="flex items-center gap-2">
                                                 <input
@@ -1230,7 +1274,7 @@ const App: React.FC = () => {
               {/* Prompt Text Area */}
               <div className="flex flex-col space-y-3">
                 <div className="flex items-center gap-3">
-                   <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">{generationMode === 'multi' ? '3' : '2'}</div>
+                   <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">{generationMode === 'video' ? '2' : '3'}</div>
                    <h2 className="text-xl font-bold text-text-primary">{generationMode === 'video' ? 'Describe the Video' : 'Describe the Transformation'}</h2>
                  </div>
                 <textarea
@@ -1351,6 +1395,42 @@ const App: React.FC = () => {
               {/* Generation Controls */}
               {generationMode !== 'video' && (
                 <>
+                {generationMode === 'single' && session && (
+                    <div className="mb-4">
+                        <label className="text-sm font-semibold text-text-secondary mb-2 block text-center">Generation Mode</label>
+                        <div className="flex bg-background rounded-lg p-1 border border-border w-full max-w-xs mx-auto">
+                            <button
+                                onClick={() => setGenerationFidelity('creative')}
+                                disabled={isGenerating || isQueued}
+                                title="Creatively transform your image based on the prompt while keeping the face."
+                                className={`w-1/2 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-50 ${generationFidelity === 'creative' ? 'bg-panel-light text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}
+                            >
+                                Creative
+                            </button>
+                            <button
+                                onClick={() => setGenerationFidelity('fidelity')}
+                                disabled={isGenerating || isQueued}
+                                title="Exactly replicate the base photo's style and pose, and apply the prompt as a minor edit."
+                                className={`w-1/2 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-50 ${generationFidelity === 'fidelity' ? 'bg-panel-light text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}
+                            >
+                                Fidelity
+                            </button>
+                        </div>
+                         <div className="mt-3 flex justify-center items-center gap-2">
+                            <input
+                                type="checkbox"
+                                id="canny-mode"
+                                checked={useCannyEdges}
+                                onChange={(e) => setUseCannyEdges(e.target.checked)}
+                                disabled={isGenerating || isQueued}
+                                className="w-4 h-4 bg-background border-border rounded text-brand focus:ring-brand focus:ring-offset-background focus:ring-2 disabled:opacity-50"
+                            />
+                            <label htmlFor="canny-mode" className="text-sm font-medium text-text-secondary cursor-pointer" title="Uses edge detection to strictly follow the original pose and composition. Best for style changes.">
+                                Use Canny Edges (Strictest Pose)
+                            </label>
+                        </div>
+                    </div>
+                )}
                 <div className="mb-4">
                     <label className="text-sm font-semibold text-text-secondary mb-2 block text-center">Image Size</label>
                     <div className="flex bg-background rounded-lg p-1 border border-border w-full max-w-xs mx-auto">
@@ -1389,7 +1469,7 @@ const App: React.FC = () => {
                 </div>
                 <div className="mb-4">
                     <label id="aspect-ratio-label" className="text-sm font-semibold text-text-secondary mb-2 block text-center">Aspect Ratio</label>
-                    <div role="group" aria-labelledby="aspect-ratio-label" className="grid grid-cols-5 gap-1 bg-background rounded-lg p-1 border border-border w-full max-w-xs mx-auto">
+                    <div role="group" aria-labelledby="aspect-ratio-label" className="flex flex-wrap justify-center gap-1 bg-background rounded-lg p-1 border border-border w-full max-w-xs mx-auto">
                         {(['1:1', '16:9', '9:16', '4:3', '3:4'] as const).map(ratio => {
                             const isProFeature = ratio !== '1:1';
                             const canUseFeature = profile?.plan === 'pro' || !isProFeature;
@@ -1409,7 +1489,7 @@ const App: React.FC = () => {
                                     }
                                 }}
                                 disabled={isGenerating || isQueued}
-                                className={`relative w-full py-2 text-xs font-semibold rounded-md transition-colors disabled:opacity-50 ${aspectRatio === ratio && canUseFeature ? 'bg-panel-light text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}
+                                className={`relative py-2 px-3 text-xs font-semibold rounded-md transition-colors disabled:opacity-50 ${aspectRatio === ratio && canUseFeature ? 'bg-panel-light text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}
                                 aria-pressed={aspectRatio === ratio && canUseFeature}
                                 title={!canUseFeature ? 'Upgrade to Pro for different aspect ratios' : `Set aspect ratio to ${ratio}`}
                             >
@@ -1425,6 +1505,68 @@ const App: React.FC = () => {
                     </div>
                 </div>
                 </>
+              )}
+              {generationMode === 'video' && (
+                <div className="space-y-4 mb-4 animate-fade-in">
+                    <div className="p-4 bg-background rounded-lg border border-border space-y-4">
+                        <h4 className="text-sm font-semibold text-text-secondary text-center">Video Settings</h4>
+                        
+                        <div>
+                            <label id="video-aspect-ratio-label" className="text-xs font-medium text-text-secondary mb-1 block text-center">Aspect Ratio</label>
+                            <div role="group" aria-labelledby="video-aspect-ratio-label" className="flex justify-center gap-1 bg-panel-light rounded-lg p-1 border border-border w-full max-w-xs mx-auto">
+                                {(['16:9', '9:16', '1:1'] as const).map(ratio => (
+                                    <button
+                                        key={ratio}
+                                        onClick={() => setVideoAspectRatio(ratio)}
+                                        disabled={isGenerating || isQueued}
+                                        className={`py-2 px-3 text-xs font-semibold rounded-md transition-colors w-1/3 disabled:opacity-50 ${videoAspectRatio === ratio ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}
+                                        aria-pressed={videoAspectRatio === ratio}
+                                        title={`Set aspect ratio to ${ratio}`}
+                                    >
+                                        {ratio}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div>
+                            <label htmlFor="motion-level" className="text-xs font-medium text-text-secondary mb-1 block text-center">Motion Level: <span className="font-bold text-text-primary">{videoMotionLevel}</span></label>
+                            <input
+                                id="motion-level"
+                                type="range"
+                                min="1"
+                                max="10"
+                                value={videoMotionLevel}
+                                onChange={(e) => setVideoMotionLevel(Number(e.target.value))}
+                                disabled={isGenerating || isQueued}
+                                className="w-full h-2 bg-panel-light rounded-lg appearance-none cursor-pointer accent-brand"
+                            />
+                        </div>
+
+                        <div>
+                             <label htmlFor="video-seed" className="text-xs font-medium text-text-secondary mb-1 block text-center">Seed (0 for random)</label>
+                             <div className="flex items-center gap-2 max-w-xs mx-auto">
+                                <input
+                                    id="video-seed"
+                                    type="number"
+                                    value={videoSeed}
+                                    onChange={(e) => setVideoSeed(Number(e.target.value))}
+                                    placeholder="Enter seed"
+                                    className="w-full p-2 bg-panel-light border border-border rounded-lg text-sm"
+                                    disabled={isGenerating || isQueued}
+                                />
+                                <button
+                                    onClick={() => setVideoSeed(Math.floor(Math.random() * 1000000))}
+                                    disabled={isGenerating || isQueued}
+                                    className="p-2 bg-panel-light text-text-secondary rounded-lg hover:bg-border disabled:opacity-50"
+                                    title="Generate random seed"
+                                >
+                                    <RefreshIcon className="w-5 h-5" />
+                                </button>
+                             </div>
+                        </div>
+                    </div>
+                </div>
               )}
               <button
                 onClick={generationMode === 'video' ? handleGenerateVideo : (generationMode === 'multi' ? handleGenerateMultiPersonImage : handleGenerateImage)}

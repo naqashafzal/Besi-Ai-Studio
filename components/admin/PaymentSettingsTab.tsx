@@ -53,15 +53,15 @@ const PaymentSettingsTab: React.FC<PaymentSettingsTabProps> = ({ settings, onUpd
                 <div className="bg-background p-6 rounded-lg border border-border">
                     <h4 className="text-xl font-semibold text-text-primary mb-1">PayPal Configuration</h4>
                     <p className="text-sm text-text-secondary mb-4">
-                        Enable payments for international users. Find keys on the <a href="https://developer.paypal.com/dashboard/applications" target="_blank" rel="noopener noreferrer" className="text-brand underline">PayPal Developer Dashboard</a>.
+                        Enable payments via PayPal Standard buttons. Enter your PayPal account email or Merchant ID below. This can be found in your <a href="https://www.paypal.com/businessprofile/settings" target="_blank" rel="noopener noreferrer" className="text-brand underline">PayPal Business account settings</a>.
                     </p>
-                    <label htmlFor="paypal-client-id" className="block text-sm font-medium text-text-secondary mb-1">Client ID</label>
+                    <label htmlFor="paypal-client-id" className="block text-sm font-medium text-text-secondary mb-1">PayPal Business Email or Merchant ID</label>
                     <input
                         id="paypal-client-id"
                         type="text"
                         value={paypalClientId}
                         onChange={e => setPaypalClientId(e.target.value)}
-                        placeholder="AbC123..."
+                        placeholder="your-business-email@example.com"
                         className="w-full p-2 bg-panel-light border border-border rounded-lg"
                     />
                 </div>
