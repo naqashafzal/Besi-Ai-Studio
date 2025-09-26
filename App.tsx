@@ -173,6 +173,49 @@ const App: React.FC = () => {
     }
   }, [session]);
 
+  const updateUserCredits = (newCredits: number) => {
+    if (session && profile) {
+      const newProfile = { ...profile, credits: newCredits };
+      setProfile(newProfile);
+    } else if (visitorProfile) {
+      const newVisitorProfile = { ...visitorProfile, credits: newCredits };
+      setVisitorProfile(newVisitorProfile);
+      localStorage.setItem('visitorProfile', JSON.stringify(newVisitorProfile));
+    }
+  };
+
+  const deductCredits = useCallback(async (amount: number): Promise<boolean> => {
+    const current = session ? profile?.credits : visitorProfile?.credits;
+    if ((current ?? 0) < amount) {
+        setError("You don't have enough credits.");
+        if (!session) setAuthModalView('sign_up');
+        return false;
+    }
+
+    const newCredits = (current ?? 0) - amount;
+
+    if (session && profile) {
+        const { data, error: updateError } = await supabase
+            .from('profiles')
+            .update({ credits: newCredits })
+            .eq('id', session.user.id)
+            .select()
+            .single();
+        
+        if (updateError) {
+            console.error("Error deducting credits:", updateError);
+            setError("Could not update your credits. Please try again.");
+            return false;
+        }
+        if (data) setProfile(p => p ? { ...p, credits: data.credits } : null);
+
+    } else {
+        // For visitors, just update local state
+        updateUserCredits(newCredits);
+    }
+    return true;
+  }, [session, profile, visitorProfile]);
+
   // Queue Processing Effect for Visitors
   useEffect(() => {
     if (isSystemBusy || queue.length === 0 || !visitorId) {
@@ -190,18 +233,26 @@ const App: React.FC = () => {
             setGeneratedImageUrls(null);
             
             try {
+                // Visitor credit check is done before joining the queue, but we do the deduction here.
+                const success = await deductCredits(STANDARD_IMAGE_CREDIT_COST);
+                if (!success) { // Double-check in case credits changed
+                    setQueue(q => q.slice(1));
+                    setIsSystemBusy(false);
+                    return;
+                }
+
                 const baseImagePart = await fileToGenerativePart(uploadedImage);
                 const imageUrls = await generateImage(prompt, baseImagePart, imageSize, aspectRatio);
                 setGeneratedImageUrls(imageUrls);
                 setGenerationState(GenerationState.SUCCESS);
                 setHistoryImageUrls(prev => [...imageUrls, ...prev]);
 
-                const newCredits = (visitorProfile?.credits ?? 1) - STANDARD_IMAGE_CREDIT_COST;
-                updateUserCredits(newCredits);
             } catch (err) {
                 console.error(err);
                 setError(err instanceof Error ? err.message : 'An unknown error occurred during image generation.');
                 setGenerationState(GenerationState.ERROR);
+                // Refund credits on failure
+                updateUserCredits((visitorProfile?.credits ?? 0) + STANDARD_IMAGE_CREDIT_COST);
             } finally {
                 setQueue(q => q.slice(1));
                 setIsSystemBusy(false);
@@ -222,18 +273,8 @@ const App: React.FC = () => {
     };
 
     processQueue();
-  }, [queue, isSystemBusy, visitorId, uploadedImage, prompt, visitorProfile, imageSize, aspectRatio]);
+  }, [queue, isSystemBusy, visitorId, uploadedImage, prompt, visitorProfile, imageSize, aspectRatio, deductCredits]);
 
-  const updateUserCredits = (newCredits: number) => {
-    if (session && profile) {
-      const newProfile = { ...profile, credits: newCredits };
-      setProfile(newProfile);
-    } else if (visitorProfile) {
-      const newVisitorProfile = { ...visitorProfile, credits: newCredits };
-      setVisitorProfile(newVisitorProfile);
-      localStorage.setItem('visitorProfile', JSON.stringify(newVisitorProfile));
-    }
-  };
 
   // Fetch Plans & Settings Effect
   useEffect(() => {
@@ -532,47 +573,30 @@ const App: React.FC = () => {
   const currentCredits = session ? profile?.credits : visitorProfile?.credits;
   
   const handleGeneratePromptFromImage = async () => {
-    if ((currentCredits ?? 0) < PROMPT_FROM_IMAGE_CREDIT_COST) {
-        setError("You don't have enough credits.");
-        if (!session) setAuthModalView('sign_up');
-        return;
-    }
     if (!promptGenImage) {
         setError("Please upload an image to generate a prompt from.");
         return;
     }
+    const canProceed = await deductCredits(PROMPT_FROM_IMAGE_CREDIT_COST);
+    if (!canProceed) return;
+
     setIsGeneratingPrompt(true);
     setError(null);
     try {
         const imagePart = await fileToGenerativePart(promptGenImage);
         const generatedPrompt = await generatePromptFromImage(imagePart, promptFocus, promptKeywords);
         setPrompt(generatedPrompt);
-        
-        const newCredits = (currentCredits ?? 0) - PROMPT_FROM_IMAGE_CREDIT_COST;
-        if (session) {
-            const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', session.user.id).select().single();
-            if(data) setProfile(p => p ? {...p, credits: data.credits} : null);
-        } else {
-            updateUserCredits(newCredits);
-        }
-
     } catch (err) {
         console.error(err);
         setError(err instanceof Error ? err.message : 'An unknown error occurred during prompt generation.');
+        // Refund credits on failure
+        updateUserCredits((currentCredits ?? 0) + PROMPT_FROM_IMAGE_CREDIT_COST);
     } finally {
         setIsGeneratingPrompt(false);
     }
   };
 
   const handleGenerateImage = useCallback(async () => {
-    const cost = imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST;
-
-    if ((currentCredits ?? 0) < cost) {
-      setError("You're out of credits. Sign up for more!");
-      if (!session) setAuthModalView('sign_up');
-      return;
-    }
-
     if (imageSize === '2048' && (!session || profile?.plan !== 'pro')) {
         setError('HD image size is a Pro feature. Please sign up or upgrade to use it.');
         if (session) {
@@ -590,6 +614,10 @@ const App: React.FC = () => {
     
     // Logged-in user: Generate directly
     if (session) {
+        const cost = imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST;
+        const canProceed = await deductCredits(cost);
+        if (!canProceed) return;
+
         setGenerationState(GenerationState.LOADING);
         setError(null);
         setGeneratedImageUrls(null);
@@ -600,37 +628,31 @@ const App: React.FC = () => {
           setGeneratedImageUrls(imageUrls);
           setGenerationState(GenerationState.SUCCESS);
           setHistoryImageUrls(prev => [...imageUrls, ...prev]);
-
-          const newCredits = (currentCredits ?? 0) - cost;
-          const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', session.user.id).select().single();
-          if (data) setProfile(p => p ? {...p, credits: data.credits} : null);
-
         } catch (err) {
           console.error(err);
           setError(err instanceof Error ? err.message : 'An unknown error occurred during image generation.');
           setGenerationState(GenerationState.ERROR);
+          // Refund credits on failure
+          updateUserCredits((profile?.credits ?? 0) + cost);
         }
         return;
     }
     
     // Visitor: Join the queue
     if (!session) {
+        if ((visitorProfile?.credits ?? 0) < STANDARD_IMAGE_CREDIT_COST) {
+            setError("You're out of credits. Sign up for more!");
+            setAuthModalView('sign_up');
+            return;
+        }
         if (!queue.includes(visitorId)) {
             setQueue(q => [...q, visitorId]);
             setGenerationState(GenerationState.QUEUED);
         }
     }
-  }, [prompt, uploadedImage, session, profile, visitorProfile, currentCredits, queue, visitorId, imageSize, aspectRatio]);
+  }, [prompt, uploadedImage, session, profile, visitorProfile, queue, visitorId, imageSize, aspectRatio, deductCredits]);
 
   const handleGenerateMultiPersonImage = useCallback(async () => {
-    const cost = imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST;
-    
-    if ((currentCredits ?? 0) < cost) {
-        setError("You're out of credits.");
-        if (!session) setAuthModalView('sign_up');
-        return;
-    }
-
     if (!session) {
         setError("Multi-person generation is available for logged-in users only.");
         setAuthModalView('sign_up');
@@ -648,6 +670,10 @@ const App: React.FC = () => {
         return;
     }
 
+    const cost = imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST;
+    const canProceed = await deductCredits(cost);
+    if (!canProceed) return;
+
     setGenerationState(GenerationState.LOADING);
     setError(null);
     setGeneratedImageUrls(null);
@@ -659,17 +685,13 @@ const App: React.FC = () => {
         setGeneratedImageUrls(imageUrls);
         setGenerationState(GenerationState.SUCCESS);
         setHistoryImageUrls(prev => [...imageUrls, ...prev]);
-
-        const newCredits = (currentCredits ?? 0) - cost;
-        const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', session.user.id).select().single();
-        if (data) setProfile(p => p ? {...p, credits: data.credits} : null);
-
     } catch (err) {
         console.error(err);
         setError(err instanceof Error ? err.message : 'An unknown error occurred during image generation.');
         setGenerationState(GenerationState.ERROR);
+        updateUserCredits((profile?.credits ?? 0) + cost);
     }
-  }, [prompt, uploadedImage, uploadedImageTwo, session, profile, currentCredits, imageSize, aspectRatio]);
+  }, [prompt, uploadedImage, uploadedImageTwo, session, profile, imageSize, aspectRatio, deductCredits]);
   
   const handleGenerateVideo = useCallback(async () => {
     if (profile?.role !== 'admin') {
@@ -678,11 +700,6 @@ const App: React.FC = () => {
       return;
     }
 
-    if ((currentCredits ?? 0) < VIDEO_CREDIT_COST) {
-        setError(`You need at least ${VIDEO_CREDIT_COST} credits to generate a video.`);
-        if (!session) setAuthModalView('sign_up');
-        return;
-    }
     if (!prompt.trim()) {
         setError('Please enter a prompt to describe the video.');
         return;
@@ -693,6 +710,8 @@ const App: React.FC = () => {
         return;
     }
 
+    const canProceed = await deductCredits(VIDEO_CREDIT_COST);
+    if (!canProceed) return;
 
     setGenerationState(GenerationState.GENERATING_VIDEO);
     setError(null);
@@ -712,18 +731,14 @@ const App: React.FC = () => {
         setGeneratedVideoUrl(downloadLink); // Pass the direct URL
         
         setGenerationState(GenerationState.SUCCESS);
-
-        const newCredits = (currentCredits ?? 0) - VIDEO_CREDIT_COST;
-        const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', session.user.id).select().single();
-        if (data) setProfile(p => p ? {...p, credits: data.credits} : null);
-
     } catch (err) {
         console.error(err);
         setError(err instanceof Error ? err.message : 'An unknown error occurred during video generation.');
         setGenerationState(GenerationState.ERROR);
+        updateUserCredits((profile?.credits ?? 0) + VIDEO_CREDIT_COST);
     }
 
-  }, [prompt, uploadedImage, session, profile, currentCredits, generatedVideoUrl, handleModeChange]);
+  }, [prompt, uploadedImage, session, profile, generatedVideoUrl, handleModeChange, deductCredits]);
   
   const handleLeaveQueue = () => {
     setQueue(q => q.filter(id => id !== visitorId));
@@ -772,8 +787,9 @@ const App: React.FC = () => {
 
   const handleSendMessage = async (message: string) => {
     if (!chatSession || !profile) return;
-    
-    if ((currentCredits ?? 0) < CHAT_CREDIT_COST) {
+
+    const canProceed = await deductCredits(CHAT_CREDIT_COST);
+    if (!canProceed) {
         setChatError("You don't have enough credits to chat.");
         return;
     }
@@ -785,15 +801,11 @@ const App: React.FC = () => {
     try {
         const response = await chatSession.sendMessage({ message });
         setChatMessages(prev => [...prev, { role: 'model', text: response.text }]);
-        
-        const newCredits = profile.credits - CHAT_CREDIT_COST;
-        const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', profile.id).select().single();
-        if (data) setProfile(p => p ? {...p, credits: data.credits} : null);
-        
     } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
         setChatError(`Sorry, something went wrong: ${errorMessage}`);
         setChatMessages(prev => [...prev, { role: 'model', text: `Sorry, I couldn't process that. Please try again.` }]);
+        updateUserCredits((profile?.credits ?? 0) + CHAT_CREDIT_COST);
     } finally {
         setIsChatLoading(false);
     }

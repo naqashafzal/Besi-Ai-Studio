@@ -1,13 +1,9 @@
-
-
 import { GoogleGenAI, Modality, Chat } from "@google/genai";
 import { GenerativePart } from '../types';
 
-if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable not set");
-}
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Use a placeholder key. The actual key is added by the server proxy.
+// The service worker intercepts the request and forwards it to our proxy.
+const ai = new GoogleGenAI({ apiKey: "DUMMY_API_KEY" });
 
 // Creates a new chat session
 export const createChat = (): Chat => {
