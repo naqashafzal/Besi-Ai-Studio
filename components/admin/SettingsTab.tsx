@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { TrashIcon, PencilIcon } from '../Icons';
 import { Plan, PlanCountryPrice, CreditCostSettings } from '../../types';
 import { countryList } from '../../constants';
@@ -26,6 +26,8 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
 }) => {
     const [editablePlans, setEditablePlans] = useState<Plan[]>(plans);
     const [isSaving, setIsSaving] = useState<Record<number, boolean>>({});
+    
+    const salePriceFeatureExists = useMemo(() => plans.some(p => 'sale_price' in p), [plans]);
 
     useEffect(() => {
         setEditablePlans(plans);
@@ -85,6 +87,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
                                         className="w-full p-2 bg-panel-light border border-border rounded-lg"
                                     />
                                 </div>
+                                {salePriceFeatureExists && (
                                  <div>
                                     <label className="block text-sm font-medium text-text-secondary mb-1">Sale Price (USD) <span className="text-xs">(Optional)</span></label>
                                     <input 
@@ -96,6 +99,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
                                         placeholder="e.g., 3.99"
                                     />
                                 </div>
+                                )}
                                 </>
                              )}
                         </div>
@@ -171,7 +175,7 @@ const CreditCostManager: React.FC<CreditCostManagerProps> = ({ settings, onSave 
     };
     
     if (!costs) {
-        return <div className="p-6 bg-background rounded-lg border border-border text-center text-text-secondary">Loading credit cost settings...</div>;
+        return <div className="p-6 bg-background rounded-lg border border-border text-center text-text-secondary">Loading credit cost settings... (If this persists, the 'credit_costs' table may be missing in your database).</div>;
     }
 
     const costFields: { key: keyof Omit<CreditCostSettings, 'id'>; label: string }[] = [
