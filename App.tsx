@@ -1,7 +1,8 @@
 
 
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { GenerationState, GenerativePart, PromptCategory, Prompt, Session, UserProfile, VisitorProfile, Plan, PaymentSettings, PlanCountryPrice, ContactFormData, ChatMessage, Coupon } from './types';
+import { GenerationState, GenerativePart, PromptCategory, Prompt, Session, UserProfile, VisitorProfile, Plan, PaymentSettings, PlanCountryPrice, ContactFormData, ChatMessage, Coupon, CreditCostSettings } from './types';
 import { generateImage, generateMultiPersonImage, generatePromptFromImage, createChat, generateVideo } from './services/geminiService';
 import * as adminService from './services/adminService';
 import * as couponService from './services/couponService';
@@ -39,6 +40,7 @@ const App: React.FC = () => {
   const [visitorProfile, setVisitorProfile] = useState<VisitorProfile | null>(null);
   const [authModalView, setAuthModalView] = useState<'sign_in' | 'sign_up' | null>(null);
   const [isMembershipModalOpen, setIsMembershipModalOpen] = useState(false);
+  const [isMembershipPromoOpen, setIsMembershipPromoOpen] = useState(false);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [planCountryPrices, setPlanCountryPrices] = useState<PlanCountryPrice[]>([]);
   const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
@@ -54,6 +56,8 @@ const App: React.FC = () => {
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
   const [uploadedImageTwo, setUploadedImageTwo] = useState<File | null>(null);
   const [imageDataUrlTwo, setImageDataUrlTwo] = useState<string | null>(null);
+  const [styleReferenceImage, setStyleReferenceImage] = useState<File | null>(null);
+  const [styleReferenceImageDataUrl, setStyleReferenceImageDataUrl] = useState<string | null>(null);
   const [imageSize, setImageSize] = useState<'1024' | '2048'>('1024');
   const [aspectRatio, setAspectRatio] = useState<'1:1' | '16:9' | '9:16' | '4:3' | '3:4'>('1:1');
 
@@ -90,6 +94,7 @@ const App: React.FC = () => {
   // Admin panel state
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [creditCostSettings, setCreditCostSettings] = useState<CreditCostSettings | null>(null);
   const pricingTableRef = useRef<HTMLElement>(null);
 
   // Queue system state for visitors
@@ -111,12 +116,18 @@ const App: React.FC = () => {
   const [historyImageUrls, setHistoryImageUrls] = useState<string[]>([]);
 
   // --- Credit Costs ---
-  const STANDARD_IMAGE_CREDIT_COST = 10;
-  const HD_IMAGE_CREDIT_COST = 20;
-  const PROMPT_FROM_IMAGE_CREDIT_COST = 2;
-  const CHAT_CREDIT_COST = 1;
-  const VIDEO_CREDIT_COST = 250;
+  const DEFAULT_CREDIT_COSTS: CreditCostSettings = {
+    id: 1,
+    standard_image: 10,
+    hd_image: 20,
+    prompt_from_image: 2,
+    chat_message: 1,
+    video_generation: 250,
+  };
 
+  const getCost = (feature: keyof Omit<CreditCostSettings, 'id'>): number => {
+    return creditCostSettings?.[feature] ?? DEFAULT_CREDIT_COSTS[feature];
+  };
 
   // Auth Effect
   useEffect(() => {
@@ -236,6 +247,7 @@ const App: React.FC = () => {
     const processQueue = async () => {
         setIsSystemBusy(true);
         const nextInQueueId = queue[0];
+        const cost = getCost('standard_image');
 
         if (nextInQueueId === visitorId && uploadedImage && prompt) {
             // It's this user's turn
@@ -245,7 +257,7 @@ const App: React.FC = () => {
             
             try {
                 // Visitor credit check is done before joining the queue, but we do the deduction here.
-                const success = await deductCredits(STANDARD_IMAGE_CREDIT_COST);
+                const success = await deductCredits(cost);
                 if (!success) { // Double-check in case credits changed
                     setQueue(q => q.slice(1));
                     setIsSystemBusy(false);
@@ -264,7 +276,7 @@ const App: React.FC = () => {
                 setError(err instanceof Error ? err.message : 'An unknown error occurred during image generation.');
                 setGenerationState(GenerationState.ERROR);
                 // Refund credits on failure
-                updateUserCredits((visitorProfile?.credits ?? 0) + STANDARD_IMAGE_CREDIT_COST);
+                updateUserCredits((visitorProfile?.credits ?? 0) + cost);
             } finally {
                 setQueue(q => q.slice(1));
                 setIsSystemBusy(false);
@@ -292,10 +304,11 @@ const App: React.FC = () => {
   useEffect(() => {
     const fetchSharedData = async () => {
         try {
-            const [fetchedPlans, settings, countryPrices] = await Promise.all([
+            const [fetchedPlans, settings, countryPrices, creditCosts] = await Promise.all([
                 adminService.getPlans(),
                 adminService.getPaymentSettings(),
-                adminService.getPlanCountryPrices()
+                adminService.getPlanCountryPrices(),
+                adminService.getCreditCostSettings()
             ]);
             // Use fetched plans if available, otherwise use defaults as a fallback
             if (fetchedPlans && fetchedPlans.length > 0) {
@@ -306,8 +319,9 @@ const App: React.FC = () => {
             }
             setPaymentSettings(settings);
             setPlanCountryPrices(countryPrices || []);
+            setCreditCostSettings(creditCosts);
         } catch (error) {
-            console.error("Error fetching shared data (plans, settings):", error);
+            console.error("Error fetching shared data (plans, settings, costs):", error);
             // On failure, use default plans to ensure the UI is still functional
             setPlans(DEFAULT_PLANS);
         }
@@ -456,6 +470,7 @@ const App: React.FC = () => {
         if (data) {
             setProfile(data);
             setIsMembershipModalOpen(false);
+            setIsMembershipPromoOpen(false);
         }
     } catch (err) {
         console.error("Error upgrading to pro:", err);
@@ -519,12 +534,13 @@ const App: React.FC = () => {
         if (isAdminPanelOpen) setIsAdminPanelOpen(false);
         if (isContactModalOpen) setIsContactModalOpen(false);
         if (isMembershipModalOpen) setIsMembershipModalOpen(false);
+        if (isMembershipPromoOpen) setIsMembershipPromoOpen(false);
         if (authModalView) setAuthModalView(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [profile, isChatOpen, isAdminPanelOpen, isContactModalOpen, isMembershipModalOpen, authModalView]);
+  }, [profile, isChatOpen, isAdminPanelOpen, isContactModalOpen, isMembershipModalOpen, isMembershipPromoOpen, authModalView]);
   
   // Admin Data Fetching
   useEffect(() => {
@@ -537,7 +553,7 @@ const App: React.FC = () => {
                 ]);
                 setAllUsers(users);
                 setCoupons(fetchedCoupons);
-                // Plans, prices and settings are already fetched globally
+                // Plans, prices, costs and settings are already fetched globally
             } catch (error) {
                 console.error("Error fetching admin data:", error);
                 setError("Could not load administrator data.");
@@ -569,6 +585,18 @@ const App: React.FC = () => {
     } else {
         setUploadedImageTwo(null);
         setImageDataUrlTwo(null);
+    }
+  };
+
+  const handleStyleReferenceImageChange = (file: File | null) => {
+    if (file) {
+        setStyleReferenceImage(file);
+        const reader = new FileReader();
+        reader.onload = (e) => setStyleReferenceImageDataUrl(e.target?.result as string);
+        reader.readAsDataURL(file);
+    } else {
+        setStyleReferenceImage(null);
+        setStyleReferenceImageDataUrl(null);
     }
   };
 
@@ -611,7 +639,8 @@ const App: React.FC = () => {
         setError("Please upload an image to generate a prompt from.");
         return;
     }
-    const canProceed = await deductCredits(PROMPT_FROM_IMAGE_CREDIT_COST);
+    const cost = getCost('prompt_from_image');
+    const canProceed = await deductCredits(cost);
     if (!canProceed) return;
 
     setIsGeneratingPrompt(true);
@@ -624,7 +653,7 @@ const App: React.FC = () => {
         console.error(err);
         setError(err instanceof Error ? err.message : 'An unknown error occurred during prompt generation.');
         // Refund credits on failure
-        updateUserCredits((currentCredits ?? 0) + PROMPT_FROM_IMAGE_CREDIT_COST);
+        updateUserCredits((currentCredits ?? 0) + cost);
     } finally {
         setIsGeneratingPrompt(false);
     }
@@ -648,7 +677,7 @@ const App: React.FC = () => {
     
     // Logged-in user: Generate directly
     if (session) {
-        const cost = imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST;
+        const cost = imageSize === '2048' ? getCost('hd_image') : getCost('standard_image');
         const canProceed = await deductCredits(cost);
         if (!canProceed) return;
 
@@ -662,6 +691,14 @@ const App: React.FC = () => {
           setGeneratedImageUrls(imageUrls);
           setGenerationState(GenerationState.SUCCESS);
           setHistoryImageUrls(prev => [...imageUrls, ...prev]);
+
+          if (profile?.plan === 'free' && !sessionStorage.getItem('promoShownThisSession')) {
+            setTimeout(() => {
+                setIsMembershipPromoOpen(true);
+                sessionStorage.setItem('promoShownThisSession', 'true');
+            }, 1200);
+          }
+
         } catch (err) {
           console.error(err);
           setError(err instanceof Error ? err.message : 'An unknown error occurred during image generation.');
@@ -674,7 +711,8 @@ const App: React.FC = () => {
     
     // Visitor: Join the queue
     if (!session) {
-        if ((visitorProfile?.credits ?? 0) < STANDARD_IMAGE_CREDIT_COST) {
+        const cost = getCost('standard_image');
+        if ((visitorProfile?.credits ?? 0) < cost) {
             setError("You're out of credits. Sign up for more!");
             setAuthModalView('sign_up');
             return;
@@ -684,7 +722,7 @@ const App: React.FC = () => {
             setGenerationState(GenerationState.QUEUED);
         }
     }
-  }, [prompt, uploadedImage, session, profile, visitorProfile, queue, visitorId, imageSize, aspectRatio, deductCredits, generationFidelity, useCannyEdges]);
+  }, [prompt, uploadedImage, session, profile, visitorProfile, queue, visitorId, imageSize, aspectRatio, deductCredits, generationFidelity, useCannyEdges, creditCostSettings]);
 
   const handleGenerateMultiPersonImage = useCallback(async () => {
     if (!session) {
@@ -704,7 +742,7 @@ const App: React.FC = () => {
         return;
     }
 
-    const cost = imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST;
+    const cost = imageSize === '2048' ? getCost('hd_image') : getCost('standard_image');
     const canProceed = await deductCredits(cost);
     if (!canProceed) return;
 
@@ -714,7 +752,8 @@ const App: React.FC = () => {
     try {
         const baseImagePart1 = await fileToGenerativePart(uploadedImage);
         const baseImagePart2 = await fileToGenerativePart(uploadedImageTwo);
-        const imageUrls = await generateMultiPersonImage(prompt, baseImagePart1, baseImagePart2, imageSize, aspectRatio);
+        const styleReferencePart = styleReferenceImage ? await fileToGenerativePart(styleReferenceImage) : null;
+        const imageUrls = await generateMultiPersonImage(prompt, baseImagePart1, baseImagePart2, imageSize, aspectRatio, styleReferencePart);
         
         setGeneratedImageUrls(imageUrls);
         setGenerationState(GenerationState.SUCCESS);
@@ -725,7 +764,7 @@ const App: React.FC = () => {
         setGenerationState(GenerationState.ERROR);
         updateUserCredits((profile?.credits ?? 0) + cost);
     }
-  }, [prompt, uploadedImage, uploadedImageTwo, session, profile, imageSize, aspectRatio, deductCredits]);
+  }, [prompt, uploadedImage, uploadedImageTwo, styleReferenceImage, session, profile, imageSize, aspectRatio, deductCredits, creditCostSettings]);
   
   const handleGenerateVideo = useCallback(async () => {
     if (profile?.role !== 'admin') {
@@ -743,8 +782,9 @@ const App: React.FC = () => {
         setAuthModalView('sign_up');
         return;
     }
-
-    const canProceed = await deductCredits(VIDEO_CREDIT_COST);
+    
+    const cost = getCost('video_generation');
+    const canProceed = await deductCredits(cost);
     if (!canProceed) return;
 
     setGenerationState(GenerationState.GENERATING_VIDEO);
@@ -769,10 +809,10 @@ const App: React.FC = () => {
         console.error(err);
         setError(err instanceof Error ? err.message : 'An unknown error occurred during video generation.');
         setGenerationState(GenerationState.ERROR);
-        updateUserCredits((profile?.credits ?? 0) + VIDEO_CREDIT_COST);
+        updateUserCredits((profile?.credits ?? 0) + cost);
     }
 
-  }, [prompt, uploadedImage, session, profile, generatedVideoUrl, handleModeChange, deductCredits, videoAspectRatio, videoMotionLevel, videoSeed]);
+  }, [prompt, uploadedImage, session, profile, generatedVideoUrl, handleModeChange, deductCredits, videoAspectRatio, videoMotionLevel, videoSeed, creditCostSettings]);
   
   const handleLeaveQueue = () => {
     setQueue(q => q.filter(id => id !== visitorId));
@@ -821,8 +861,9 @@ const App: React.FC = () => {
 
   const handleSendMessage = async (message: string) => {
     if (!chatSession || !profile) return;
-
-    const canProceed = await deductCredits(CHAT_CREDIT_COST);
+    
+    const cost = getCost('chat_message');
+    const canProceed = await deductCredits(cost);
     if (!canProceed) {
         setChatError("You don't have enough credits to chat.");
         return;
@@ -839,7 +880,7 @@ const App: React.FC = () => {
         const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
         setChatError(`Sorry, something went wrong: ${errorMessage}`);
         setChatMessages(prev => [...prev, { role: 'model', text: `Sorry, I couldn't process that. Please try again.` }]);
-        updateUserCredits((profile?.credits ?? 0) + CHAT_CREDIT_COST);
+        updateUserCredits((profile?.credits ?? 0) + cost);
     } finally {
         setIsChatLoading(false);
     }
@@ -915,6 +956,11 @@ const App: React.FC = () => {
   const handleAdminDeletePlanCountryPrice = async (priceId: number) => {
     await adminService.deletePlanCountryPrice(priceId);
     setPlanCountryPrices(prev => prev.filter(p => p.id !== priceId));
+  };
+
+  const handleAdminUpdateCreditCostSettings = async (updates: Partial<Omit<CreditCostSettings, 'id'>>) => {
+    const updatedSettings = await adminService.updateCreditCostSettings(updates);
+    setCreditCostSettings(updatedSettings);
   };
 
   const handleAdminAddCoupon = async (couponData: Omit<Coupon, 'id' | 'created_at' | 'times_used'>) => {
@@ -1032,17 +1078,18 @@ const App: React.FC = () => {
     if (generationMode === 'single' && !session && (isSystemBusy || queue.length > 0)) return `Join Queue (${queue.length} waiting)`;
 
     if (generationMode === 'video') {
-        if ((currentCredits ?? 0) < VIDEO_CREDIT_COST) return 'Not Enough Credits';
-        return `Generate Video (${VIDEO_CREDIT_COST} Credits)`;
+        const cost = getCost('video_generation');
+        if ((currentCredits ?? 0) < cost) return 'Not Enough Credits';
+        return `Generate Video (${cost} Credits)`;
     }
     
-    const cost = imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST;
+    const cost = imageSize === '2048' ? getCost('hd_image') : getCost('standard_image');
     if ((currentCredits ?? 0) < cost) return 'Out of Credits';
     return `Generate Image (${cost} Credits)`;
   };
   
   const renderCreditWarning = () => {
-    const cost = imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST;
+    const cost = imageSize === '2048' ? getCost('hd_image') : getCost('standard_image');
     if ((currentCredits ?? 0) >= cost || isGenerating || isQueued) return null;
 
     const freePlan = plans.find(p => p.name === 'free');
@@ -1087,6 +1134,7 @@ const App: React.FC = () => {
           paymentSettings={paymentSettings}
           planCountryPrices={planCountryPrices}
           coupons={coupons}
+          creditCostSettings={creditCostSettings}
           onAddPrompt={handleAddPrompt}
           onRemovePrompt={handleRemovePrompt}
           onUpdatePrompt={handleUpdatePrompt}
@@ -1097,21 +1145,26 @@ const App: React.FC = () => {
           onAddPlanCountryPrice={handleAdminAddPlanCountryPrice}
           onUpdatePlanCountryPrice={handleAdminUpdatePlanCountryPrice}
           onDeletePlanCountryPrice={handleAdminDeletePlanCountryPrice}
+          onUpdateCreditCostSettings={handleAdminUpdateCreditCostSettings}
           onAddCoupon={handleAdminAddCoupon}
           onUpdateCoupon={handleAdminUpdateCoupon}
           onDeleteCoupon={handleAdminDeleteCoupon}
           onClose={() => setIsAdminPanelOpen(false)}
         />
       )}
-      {isMembershipModalOpen && proPlan && (
+      {(isMembershipModalOpen || isMembershipPromoOpen) && proPlan && (
         <MembershipModal
             plan={proPlan}
             planCountryPrices={planCountryPrices}
-            onClose={() => setIsMembershipModalOpen(false)}
+            onClose={() => {
+                setIsMembershipModalOpen(false);
+                setIsMembershipPromoOpen(false);
+            }}
             onUpgrade={handleUpgradeToPro}
             country={profile?.country}
             paymentSettings={paymentSettings}
             profile={profile}
+            isPromo={isMembershipPromoOpen}
         />
       )}
       <main className="container mx-auto p-4 sm:p-6 md:p-8">
@@ -1165,34 +1218,64 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex-grow space-y-8">
-              {/* Step 1 */}
-              <div className="flex flex-col space-y-3">
-                 <div className="flex items-center gap-3">
-                   <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">1</div>
-                   <h2 className="text-xl font-bold text-text-primary">
-                    {generationMode === 'multi' ? 'Upload First Person' : (generationMode === 'video' ? 'Upload Reference Photo (Optional)' : 'Upload Base Photo')}
-                   </h2>
-                 </div>
-                <ImageUploader 
-                  onImageChange={handleImageChange}
-                  imageDataUrl={imageDataUrl}
-                  disabled={isGenerating || isQueued}
-                />
-              </div>
+              {generationMode !== 'multi' ? (
+                // Single and Video mode uploader
+                <div className="flex flex-col space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">1</div>
+                    <h2 className="text-xl font-bold text-text-primary">
+                      {generationMode === 'video' ? 'Upload Reference Photo (Optional)' : 'Upload Base Photo'}
+                    </h2>
+                  </div>
+                  <ImageUploader 
+                    onImageChange={handleImageChange}
+                    imageDataUrl={imageDataUrl}
+                    disabled={isGenerating || isQueued}
+                  />
+                </div>
+              ) : (
+                // Multi mode uploaders
+                <div className="flex flex-col space-y-3 animate-fade-in">
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">1</div>
+                    <h2 className="text-xl font-bold text-text-primary">Upload Photos</h2>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="flex flex-col space-y-2">
+                        <h3 className="text-md font-semibold text-text-secondary text-center">First Person</h3>
+                        <ImageUploader 
+                            onImageChange={handleImageChange}
+                            imageDataUrl={imageDataUrl}
+                            disabled={isGenerating || isQueued}
+                        />
+                    </div>
+                    <div className="flex flex-col space-y-2">
+                        <h3 className="text-md font-semibold text-text-secondary text-center">Second Person</h3>
+                        <ImageUploader 
+                            onImageChange={handleImageTwoChange}
+                            imageDataUrl={imageDataUrlTwo}
+                            disabled={isGenerating || isQueued}
+                        />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {generationMode === 'multi' && (
                 <div className="flex flex-col space-y-3 animate-fade-in">
                     <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">2</div>
-                    <h2 className="text-xl font-bold text-text-primary">Upload Second Person</h2>
+                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">2</div>
+                      <h2 className="text-xl font-bold text-text-primary">Upload Style Reference <span className="text-sm text-text-secondary">(Optional)</span></h2>
                     </div>
+                    <p className="ml-11 -mt-2 text-sm text-text-secondary">Upload a third image to guide the mood, composition, and background. The people in this image will be ignored.</p>
                     <ImageUploader 
-                    onImageChange={handleImageTwoChange}
-                    imageDataUrl={imageDataUrlTwo}
-                    disabled={isGenerating || isQueued}
+                      onImageChange={handleStyleReferenceImageChange}
+                      imageDataUrl={styleReferenceImageDataUrl}
+                      disabled={isGenerating || isQueued}
                     />
                 </div>
               )}
+
 
               {/* Get Prompt from Image (Single Person Only) */}
               {generationMode === 'single' && (
@@ -1260,11 +1343,11 @@ const App: React.FC = () => {
                         </div>
                         <button
                             onClick={handleGeneratePromptFromImage}
-                            disabled={isGenerating || isQueued || isGeneratingPrompt || !promptGenImage || (currentCredits ?? 0) < PROMPT_FROM_IMAGE_CREDIT_COST}
+                            disabled={isGenerating || isQueued || isGeneratingPrompt || !promptGenImage || (currentCredits ?? 0) < getCost('prompt_from_image')}
                             className="w-full flex items-center justify-center py-3 px-4 bg-panel-light text-text-primary font-semibold rounded-lg shadow-md hover:bg-border transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <PhotoIcon className="w-5 h-5 mr-2" />
-                            {isGeneratingPrompt ? `Analyzing... (${PROMPT_FROM_IMAGE_CREDIT_COST} Credits)` : `Generate Prompt (${PROMPT_FROM_IMAGE_CREDIT_COST} Credits)`}
+                            {isGeneratingPrompt ? `Analyzing... (${getCost('prompt_from_image')} Credits)` : `Generate Prompt (${getCost('prompt_from_image')} Credits)`}
                         </button>
                     </div>
                     </div>
@@ -1273,9 +1356,22 @@ const App: React.FC = () => {
 
               {/* Prompt Text Area */}
               <div className="flex flex-col space-y-3">
-                <div className="flex items-center gap-3">
-                   <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">{generationMode === 'video' ? '2' : '3'}</div>
-                   <h2 className="text-xl font-bold text-text-primary">{generationMode === 'video' ? 'Describe the Video' : 'Describe the Transformation'}</h2>
+                 <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                       <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">{generationMode === 'multi' ? '3' : (generationMode === 'video' ? '2' : '3')}</div>
+                       <h2 className="text-xl font-bold text-text-primary">{generationMode === 'video' ? 'Describe the Video' : 'Describe the Transformation'}</h2>
+                    </div>
+                    {generationMode === 'multi' && (
+                        <button
+                            onClick={() => setPrompt("Create a realistic, photorealistic image of the two people from the uploaded photos standing together. They should be looking at the camera with a natural, friendly expression. Ensure the lighting is consistent across both individuals and that they appear to be in the same environment. The background should be a simple, out-of-focus outdoor setting. Strictly use the faces and expressions from the uploaded photos.")}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-panel-light text-brand rounded-md hover:bg-border transition-colors disabled:opacity-50"
+                            disabled={isGenerating || isQueued}
+                            title="Suggest a prompt for merging two people"
+                        >
+                            <SparklesIcon className="w-4 h-4" />
+                            Suggest
+                        </button>
+                    )}
                  </div>
                 <textarea
                   id="prompt"
@@ -1571,9 +1667,9 @@ const App: React.FC = () => {
               <button
                 onClick={generationMode === 'video' ? handleGenerateVideo : (generationMode === 'multi' ? handleGenerateMultiPersonImage : handleGenerateImage)}
                 disabled={isGenerating || isQueued || 
-                    (generationMode === 'video' && (!prompt.trim() || (currentCredits ?? 0) < VIDEO_CREDIT_COST || !session)) ||
-                    (generationMode === 'single' && (!prompt.trim() || !imageDataUrl || (currentCredits ?? 0) < (imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST))) ||
-                    (generationMode === 'multi' && (!prompt.trim() || !imageDataUrl || !imageDataUrlTwo || (currentCredits ?? 0) < (imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST)))
+                    (generationMode === 'video' && (!prompt.trim() || (currentCredits ?? 0) < getCost('video_generation') || !session)) ||
+                    (generationMode === 'single' && (!prompt.trim() || !imageDataUrl || (currentCredits ?? 0) < (imageSize === '2048' ? getCost('hd_image') : getCost('standard_image')))) ||
+                    (generationMode === 'multi' && (!prompt.trim() || !imageDataUrl || !imageDataUrlTwo || (currentCredits ?? 0) < (imageSize === '2048' ? getCost('hd_image') : getCost('standard_image'))))
                 }
                 className="w-full flex items-center justify-center py-4 px-6 bg-brand text-white font-bold rounded-lg shadow-lg hover:bg-brand-hover transform hover:-translate-y-0.5 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
               >
@@ -1623,6 +1719,7 @@ const App: React.FC = () => {
             profile={profile}
             onClose={() => setIsChatOpen(false)}
             onSendMessage={handleSendMessage}
+            chatCreditCost={getCost('chat_message')}
         />
       )}
       

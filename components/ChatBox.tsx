@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage, UserProfile } from '../types';
 import { XMarkIcon, PaperAirplaneIcon, SparklesIcon } from './Icons';
@@ -10,9 +11,10 @@ interface ChatBoxProps {
     profile: UserProfile;
     onClose: () => void;
     onSendMessage: (message: string) => void;
+    chatCreditCost: number;
 }
 
-const ChatBox: React.FC<ChatBoxProps> = ({ messages, isLoading, error, profile, onClose, onSendMessage }) => {
+const ChatBox: React.FC<ChatBoxProps> = ({ messages, isLoading, error, profile, onClose, onSendMessage, chatCreditCost }) => {
     const [input, setInput] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -94,7 +96,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, isLoading, error, profile, 
                             <PaperAirplaneIcon className="w-6 h-6" />
                         </button>
                     </form>
-                     <p className="text-xs text-text-tertiary text-center mt-2">Each message costs 1 credit.</p>
+                     <p className="text-xs text-text-tertiary text-center mt-2">Each message costs {chatCreditCost} credit{chatCreditCost === 1 ? '' : 's'}.</p>
                 </div>
             </div>
         </div>

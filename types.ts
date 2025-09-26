@@ -1,4 +1,5 @@
 
+
 import type { Session } from '@supabase/supabase-js';
 
 export enum GenerationState {
@@ -48,6 +49,16 @@ export interface Plan {
     name: string;
     price: number;
     credits_per_month: number;
+    sale_price?: number | null;
+}
+
+export interface CreditCostSettings {
+    id: number;
+    standard_image: number;
+    hd_image: number;
+    prompt_from_image: number;
+    chat_message: number;
+    video_generation: number;
 }
 
 export interface PlanCountryPrice {

@@ -180,11 +180,24 @@ export const generateMultiPersonImage = async (
     baseImage1: GenerativePart,
     baseImage2: GenerativePart,
     imageSize: '1024' | '2048' = '1024',
-    aspectRatio: '1:1' | '16:9' | '9:16' | '4:3' | '3:4' = '1:1'
+    aspectRatio: '1:1' | '16:9' | '9:16' | '4:3' | '3:4' = '1:1',
+    styleReferenceImage: GenerativePart | null
 ): Promise<string[]> => {
     try {
-        const facialInstruction = "It is absolutely critical that you strictly use the face, expression, and all facial details of BOTH people from their respective base photos. Do not alter their age, race, gender, or any physical characteristics. The original people must be perfectly preserved.";
-        let finalPrompt = `INSTRUCTION: Combine the two people from the two separate uploaded images into one cohesive scene described by the user prompt. ${facialInstruction}\nUSER PROMPT: "${prompt}"`;
+        const facialInstruction = "It is absolutely critical that you strictly use the face, expression, and all facial details of BOTH people from their respective base photos (the first two images). Do not alter their age, race, gender, or any physical characteristics. The original people must be perfectly preserved.";
+        let finalPrompt = '';
+
+        const parts: ({ inlineData: { data: string; mimeType: string; } } | { text: string; })[] = [
+            { inlineData: { data: baseImage1.data, mimeType: baseImage1.mimeType } }, // Person 1
+            { inlineData: { data: baseImage2.data, mimeType: baseImage2.mimeType } }, // Person 2
+        ];
+
+        if (styleReferenceImage) {
+            finalPrompt = `INSTRUCTION: This is an advanced multi-person style transfer task. You have been provided with three images. The first two images contain Person A and Person B respectively. The third image is a style reference. Your task is to generate a new image that places Person A and Person B into a scene described by the user's prompt. You MUST adopt the overall style, composition, mood, lighting, and background from the third style reference image. CRITICAL: You MUST IGNORE the people in the style reference image; only use its aesthetic qualities. ${facialInstruction}\nUSER PROMPT: "${prompt}"`;
+            parts.push({ inlineData: { data: styleReferenceImage.data, mimeType: styleReferenceImage.mimeType } }); // Style Reference
+        } else {
+            finalPrompt = `INSTRUCTION: Combine the two people from the two separate uploaded images into one cohesive scene described by the user prompt. ${facialInstruction}\nUSER PROMPT: "${prompt}"`;
+        }
 
         if (aspectRatio !== '1:1') {
             finalPrompt += `\nASPECT RATIO: ${aspectRatio}`;
@@ -194,11 +207,7 @@ export const generateMultiPersonImage = async (
             finalPrompt += `\nQUALITY: High resolution, 4K, ultra-detailed, 2048x2048 pixels.`;
         }
 
-        const parts = [
-            { inlineData: { data: baseImage1.data, mimeType: baseImage1.mimeType } },
-            { inlineData: { data: baseImage2.data, mimeType: baseImage2.mimeType } },
-            { text: finalPrompt },
-        ];
+        parts.push({ text: finalPrompt });
 
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash-image-preview',

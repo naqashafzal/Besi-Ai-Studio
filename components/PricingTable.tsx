@@ -1,4 +1,5 @@
 
+
 import React, { forwardRef, useMemo } from 'react';
 import { Plan, Session, UserProfile, PlanCountryPrice } from '../types';
 import { CheckIcon, StarIcon } from './Icons';
@@ -77,6 +78,8 @@ const PricingTable = forwardRef<HTMLElement, PricingTableProps>(({ plans, sessio
           const isPro = plan.name === 'pro';
           const isCurrentPlan = profile?.plan === plan.name;
           const isUSD = (plan as any).currency === 'USD';
+          const hasSalePrice = plan.sale_price != null && plan.sale_price < plan.price;
+          const finalPrice = hasSalePrice ? plan.sale_price! : plan.price;
 
           return (
             <div
@@ -97,9 +100,16 @@ const PricingTable = forwardRef<HTMLElement, PricingTableProps>(({ plans, sessio
                 <p className="text-text-secondary mt-2 h-12">{plan.name === 'free' ? 'For casual users to try things out.' : 'For power users who want the best.'}</p>
 
                 <div className="my-8">
-                  <span className="text-5xl font-extrabold text-text-primary">
-                    {isUSD ? `$${plan.price.toFixed(2)}` : plan.price.toLocaleString()}
-                  </span>
+                  <div className="flex items-baseline justify-center md:justify-start gap-2">
+                    {hasSalePrice && (
+                      <span className="text-3xl font-bold text-text-secondary line-through">
+                          {isUSD ? `$${plan.price.toFixed(2)}` : plan.price.toLocaleString()}
+                      </span>
+                    )}
+                    <span className="text-5xl font-extrabold text-text-primary">
+                      {isUSD ? `$${finalPrice.toFixed(2)}` : finalPrice.toLocaleString()}
+                    </span>
+                  </div>
                   <span className="text-text-secondary">{isUSD ? '/month' : ` ${(plan as any).currency}/month`}</span>
                 </div>
                 

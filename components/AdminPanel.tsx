@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { XMarkIcon } from './Icons';
-import { PromptCategory, UserProfile, Plan, PaymentSettings, PlanCountryPrice, Coupon } from '../types';
+import { PromptCategory, UserProfile, Plan, PaymentSettings, PlanCountryPrice, Coupon, CreditCostSettings } from '../types';
 
 import UserManagementTab from './admin/UserManagementTab';
 import PromptManagementTab from './admin/PromptManagementTab';
@@ -18,6 +18,7 @@ interface AdminPanelProps {
   paymentSettings: PaymentSettings | null;
   planCountryPrices: PlanCountryPrice[];
   coupons: Coupon[];
+  creditCostSettings: CreditCostSettings | null;
   onAddPrompt: (prompt: { text: string; imageFile: File | null }, categoryTitle: string) => void;
   onRemovePrompt: (promptId: string) => void;
   onUpdatePrompt: (promptId: string, updates: { text: string; categoryTitle: string; imageFile: File | null; removeImage: boolean }, originalImageUrl: string | null) => void;
@@ -28,6 +29,7 @@ interface AdminPanelProps {
   onAddPlanCountryPrice: (price: Omit<PlanCountryPrice, 'id'>) => Promise<void>;
   onUpdatePlanCountryPrice: (priceId: number, updates: Partial<PlanCountryPrice>) => Promise<void>;
   onDeletePlanCountryPrice: (priceId: number) => Promise<void>;
+  onUpdateCreditCostSettings: (updates: Partial<Omit<CreditCostSettings, 'id'>>) => Promise<void>;
   onAddCoupon: (couponData: Omit<Coupon, 'id' | 'created_at' | 'times_used'>) => Promise<void>;
   onUpdateCoupon: (couponId: number, updates: Partial<Coupon>) => Promise<void>;
   onDeleteCoupon: (couponId: number) => Promise<void>;
@@ -41,6 +43,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
     paymentSettings,
     planCountryPrices,
     coupons,
+    creditCostSettings,
     onAddPrompt, 
     onRemovePrompt, 
     onUpdatePrompt,
@@ -51,6 +54,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
     onAddPlanCountryPrice,
     onUpdatePlanCountryPrice,
     onDeletePlanCountryPrice,
+    onUpdateCreditCostSettings,
     onAddCoupon,
     onUpdateCoupon,
     onDeleteCoupon,
@@ -91,6 +95,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
                                             onAddPlanCountryPrice={onAddPlanCountryPrice}
                                             onUpdatePlanCountryPrice={onUpdatePlanCountryPrice}
                                             onDeletePlanCountryPrice={onDeletePlanCountryPrice}
+                                            creditCostSettings={creditCostSettings}
+                                            onUpdateCreditCostSettings={onUpdateCreditCostSettings}
                                         />}
           {activeTab === 'payments' && <PaymentSettingsTab settings={paymentSettings} onUpdateSettings={onUpdatePaymentSettings} />}
           {activeTab === 'manual_payments' && <ManualPaymentTab users={allUsers} />}

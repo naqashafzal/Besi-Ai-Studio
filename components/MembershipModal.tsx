@@ -2,6 +2,8 @@
 
 
 
+
+
 import React, { useMemo, useState } from 'react';
 import { XMarkIcon, StarIcon, SparklesIcon, TicketIcon } from './Icons';
 import { Plan, PaymentSettings, UserProfile, PlanCountryPrice, Coupon } from '../types';
@@ -15,9 +17,10 @@ interface MembershipModalProps {
   paymentSettings: PaymentSettings | null;
   profile: UserProfile | null;
   planCountryPrices: PlanCountryPrice[];
+  isPromo?: boolean;
 }
 
-const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgrade, country, paymentSettings, profile, planCountryPrices }) => {
+const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgrade, country, paymentSettings, profile, planCountryPrices, isPromo = false }) => {
     const [isUpgrading, setIsUpgrading] = useState(false);
     const [couponCode, setCouponCode] = useState('');
     const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
@@ -40,19 +43,25 @@ const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgr
         return planWithCurrency;
     }, [plan, country, planCountryPrices]);
 
+    const basePrice = useMemo(() => {
+        return (displayedPlan.sale_price != null && displayedPlan.sale_price < displayedPlan.price) 
+            ? displayedPlan.sale_price 
+            : displayedPlan.price;
+    }, [displayedPlan]);
+
     const discountedPrice = useMemo(() => {
         if (!appliedCoupon) return null;
-        const originalPrice = displayedPlan.price;
         if (appliedCoupon.discount_type === 'fixed') {
-            return Math.max(0, originalPrice - appliedCoupon.discount_value);
+            return Math.max(0, basePrice - appliedCoupon.discount_value);
         }
         if (appliedCoupon.discount_type === 'percentage') {
-            return originalPrice * (1 - appliedCoupon.discount_value / 100);
+            return basePrice * (1 - appliedCoupon.discount_value / 100);
         }
         return null;
-    }, [appliedCoupon, displayedPlan.price]);
+    }, [appliedCoupon, basePrice]);
     
-    const finalPrice = discountedPrice !== null ? discountedPrice : displayedPlan.price;
+    const finalPrice = discountedPrice !== null ? discountedPrice : basePrice;
+    const hasSalePrice = displayedPlan.sale_price != null && displayedPlan.sale_price < displayedPlan.price;
 
     const isPakistan = country === 'Pakistan';
     const canPayManually = isPakistan && !!paymentSettings?.manual_payment_instructions_pk;
@@ -175,9 +184,15 @@ const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgr
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-panel rounded-2xl shadow-2xl border border-border w-full max-w-md relative overflow-hidden">
              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-brand to-brand-secondary"></div>
+             {isPromo && (
+                <div className="p-3 bg-brand/10 border-b border-brand/20 text-center animate-fade-in">
+                    <h3 className="font-bold text-lg text-brand">You're on a roll!</h3>
+                    <p className="text-sm text-brand/80">Take your creations to the next level with Pro.</p>
+                </div>
+            )}
              <button
                 onClick={onClose}
-                className="absolute top-4 right-4 text-text-secondary hover:text-text-primary transition-colors"
+                className="absolute top-4 right-4 text-text-secondary hover:text-text-primary transition-colors z-10"
                 aria-label="Close membership modal"
             >
                 <XMarkIcon className="w-6 h-6" />
@@ -252,7 +267,7 @@ const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgr
 
 
                  <div className="text-center">
-                    {discountedPrice !== null && (
+                    {(hasSalePrice || discountedPrice !== null) && (
                          <p className="text-lg text-text-secondary line-through">
                              {displayedPlan.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                          </p>

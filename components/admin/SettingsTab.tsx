@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { TrashIcon, PencilIcon } from '../Icons';
-import { Plan, PlanCountryPrice } from '../../types';
+import { Plan, PlanCountryPrice, CreditCostSettings } from '../../types';
 import { countryList } from '../../constants';
 
 interface SettingsTabProps {
@@ -10,6 +10,8 @@ interface SettingsTabProps {
     onAddPlanCountryPrice: (price: Omit<PlanCountryPrice, 'id'>) => Promise<void>;
     onUpdatePlanCountryPrice: (priceId: number, updates: Partial<PlanCountryPrice>) => Promise<void>;
     onDeletePlanCountryPrice: (priceId: number) => Promise<void>;
+    creditCostSettings: CreditCostSettings | null;
+    onUpdateCreditCostSettings: (updates: Partial<Omit<CreditCostSettings, 'id'>>) => Promise<void>;
 }
 
 const SettingsTab: React.FC<SettingsTabProps> = ({ 
@@ -19,6 +21,8 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
     onAddPlanCountryPrice,
     onUpdatePlanCountryPrice,
     onDeletePlanCountryPrice,
+    creditCostSettings,
+    onUpdateCreditCostSettings,
 }) => {
     const [editablePlans, setEditablePlans] = useState<Plan[]>(plans);
     const [isSaving, setIsSaving] = useState<Record<number, boolean>>({});
@@ -27,7 +31,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
         setEditablePlans(plans);
     }, [plans]);
 
-    const handlePlanChange = (planId: number, field: keyof Plan, value: string | number) => {
+    const handlePlanChange = (planId: number, field: keyof Plan, value: string | number | null) => {
         setEditablePlans(currentPlans => 
             currentPlans.map(p => p.id === planId ? { ...p, [field]: value } : p)
         );
@@ -39,6 +43,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
             await onUpdatePlan(plan.id, {
                 price: plan.price,
                 credits_per_month: plan.credits_per_month,
+                sale_price: plan.sale_price,
             });
             alert(`${plan.name} plan updated successfully!`);
         } catch (error) {
@@ -69,6 +74,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
                                 />
                              </div>
                              {plan.name !== 'free' && (
+                                <>
                                 <div>
                                     <label className="block text-sm font-medium text-text-secondary mb-1">Default Price (USD)</label>
                                     <input 
@@ -79,6 +85,18 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
                                         className="w-full p-2 bg-panel-light border border-border rounded-lg"
                                     />
                                 </div>
+                                 <div>
+                                    <label className="block text-sm font-medium text-text-secondary mb-1">Sale Price (USD) <span className="text-xs">(Optional)</span></label>
+                                    <input 
+                                        type="number" 
+                                        step="0.01"
+                                        value={plan.sale_price ?? ''}
+                                        onChange={e => handlePlanChange(plan.id, 'sale_price', e.target.value ? parseFloat(e.target.value) : null)}
+                                        className="w-full p-2 bg-panel-light border border-border rounded-lg"
+                                        placeholder="e.g., 3.99"
+                                    />
+                                </div>
+                                </>
                              )}
                         </div>
                         <div className="mt-6 text-right">
@@ -92,6 +110,14 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
                         </div>
                     </div>
                 ))}
+            </div>
+
+            <div className="mt-12">
+                <h3 className="text-2xl font-bold text-text-primary mb-6">Feature Credit Costs</h3>
+                <CreditCostManager
+                    settings={creditCostSettings}
+                    onSave={onUpdateCreditCostSettings}
+                />
             </div>
             
             <div className="mt-12">
@@ -107,6 +133,83 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
         </div>
     );
 };
+
+interface CreditCostManagerProps {
+    settings: CreditCostSettings | null;
+    onSave: (updates: Partial<Omit<CreditCostSettings, 'id'>>) => Promise<void>;
+}
+
+const CreditCostManager: React.FC<CreditCostManagerProps> = ({ settings, onSave }) => {
+    const [costs, setCosts] = useState<CreditCostSettings | null>(settings);
+    const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        setCosts(settings);
+    }, [settings]);
+
+    const handleChange = (field: keyof Omit<CreditCostSettings, 'id'>, value: string) => {
+        if (!costs) return;
+        const numValue = parseInt(value, 10);
+        if (!isNaN(numValue)) {
+            setCosts({ ...costs, [field]: numValue });
+        }
+    };
+
+    const handleSave = async () => {
+        if (!costs) return;
+        setIsSaving(true);
+        const { id, ...updates } = costs;
+        try {
+            await onSave(updates);
+            alert("Credit costs updated successfully!");
+        } catch (error) {
+            alert("Failed to update credit costs.");
+            console.error(error);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+    
+    if (!costs) {
+        return <div className="p-6 bg-background rounded-lg border border-border text-center text-text-secondary">Loading credit cost settings...</div>;
+    }
+
+    const costFields: { key: keyof Omit<CreditCostSettings, 'id'>; label: string }[] = [
+        { key: 'standard_image', label: 'Standard Image Generation' },
+        { key: 'hd_image', label: 'HD Image Generation (Pro)' },
+        { key: 'video_generation', label: 'Video Generation (Admin)' },
+        { key: 'prompt_from_image', label: 'Prompt from Image' },
+        { key: 'chat_message', label: 'AI Assistant Message' },
+    ];
+
+    return (
+        <div className="bg-background p-6 rounded-lg border border-border">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                {costFields.map(({ key, label }) => (
+                     <div key={key}>
+                        <label className="block text-sm font-medium text-text-secondary mb-1">{label}</label>
+                        <input 
+                            type="number"
+                            value={costs[key]}
+                            onChange={e => handleChange(key, e.target.value)}
+                            className="w-full p-2 bg-panel-light border border-border rounded-lg"
+                        />
+                     </div>
+                ))}
+            </div>
+            <div className="mt-6 text-right">
+                <button
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    className="px-5 py-2 bg-brand text-white font-semibold rounded-lg hover:bg-brand-hover disabled:opacity-50"
+                >
+                    {isSaving ? 'Saving Costs...' : 'Save Credit Costs'}
+                </button>
+            </div>
+        </div>
+    );
+};
+
 
 interface RegionalPricingManagerProps {
   plans: Plan[];

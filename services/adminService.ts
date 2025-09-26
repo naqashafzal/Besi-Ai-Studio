@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { UserProfile, Plan, PaymentSettings, PlanCountryPrice, PromptCategory, ContactFormData, Prompt, Coupon } from '../types';
+import { UserProfile, Plan, PaymentSettings, PlanCountryPrice, PromptCategory, ContactFormData, Prompt, Coupon, CreditCostSettings } from '../types';
 
 /**
  * Fetches all user profiles from the database.
@@ -175,6 +175,43 @@ export const deletePlanCountryPrice = async (priceId: number): Promise<void> => 
         console.error("Error deleting plan country price:", error);
         throw error;
     }
+};
+
+/**
+ * Fetches credit cost settings from the database.
+ * Publicly readable.
+ */
+export const getCreditCostSettings = async (): Promise<CreditCostSettings | null> => {
+    const { data, error } = await supabase
+        .from('credit_costs')
+        .select('*')
+        .eq('id', 1)
+        .maybeSingle();
+
+    if (error) {
+        console.error("Error fetching credit cost settings:", error);
+        throw error;
+    }
+    return data;
+};
+
+/**
+ * Updates credit cost settings in the database.
+ * Requires admin privileges.
+ */
+export const updateCreditCostSettings = async (updates: Partial<Omit<CreditCostSettings, 'id'>>): Promise<CreditCostSettings> => {
+    const { data, error } = await supabase
+        .from('credit_costs')
+        .update(updates)
+        .eq('id', 1)
+        .select()
+        .single();
+
+    if (error) {
+        console.error("Error updating credit cost settings:", error);
+        throw error;
+    }
+    return data;
 };
 
 // --- Prompt Management (using Supabase) ---
