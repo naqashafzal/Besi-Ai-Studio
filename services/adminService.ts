@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
-import { UserProfile, Plan, PaymentSettings, PlanCountryPrice, PromptCategory, ContactFormData, Prompt } from '../types';
+import { UserProfile, Plan, PaymentSettings, PlanCountryPrice, PromptCategory, ContactFormData, Prompt, Coupon } from '../types';
+import { dataUrlToFile } from '../utils/fileHelpers';
 
 /**
  * Fetches all user profiles from the database.
@@ -96,12 +97,10 @@ export const getPaymentSettings = async (): Promise<PaymentSettings | null> => {
     const { data, error } = await supabase
         .from('payment_settings')
         .select('*')
-        .single();
+        .maybeSingle();
 
     if (error) {
         console.error("Error fetching payment settings:", error);
-        // Don't throw if not found, just return null
-        if (error.code === 'PGRST116') return null; 
         throw error;
     }
     return data;
@@ -182,150 +181,178 @@ export const deletePlanCountryPrice = async (priceId: number): Promise<void> => 
 // --- Prompt Management ---
 
 /**
- * Converts a File object to a base64 data URL.
+ * Uploads an image file to the local server.
+ * @param file The image file to upload.
+ * @returns The local URL of the uploaded file.
  */
-const fileToDataUrl = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
+const uploadImageToServer = async (file: File): Promise<string> => {
+    const reader = new FileReader();
+    const dataUrlPromise = new Promise<string>((resolve, reject) => {
         reader.onload = () => resolve(reader.result as string);
         reader.onerror = error => reject(error);
-        reader.readAsDataURL(file);
     });
-};
+    reader.readAsDataURL(file);
+    const dataUrl = await dataUrlPromise;
 
+    const response = await fetch('/prompt-images-upload', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+            imageData: dataUrl,
+            // Create a unique filename to avoid collisions
+            fileName: `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9-._]/g, '')}`
+        }),
+    });
 
-/**
- * Fetches all prompt categories and their prompts from the database.
- * This function uses two queries and joins the data in code to be more robust
- * against potential database relation or RLS issues with complex queries.
- */
-export const getPrompts = async (): Promise<PromptCategory[]> => {
-    // This single query is much faster. It joins categories with their prompts
-    // in the database and only fetches categories that have at least one prompt.
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to upload image' }));
+        throw new Error(errorData.error || 'Failed to upload image to server.');
+    }
     
-    const { data, error } = await supabase
-        .from('prompt_categories')
-        .select('id, title, example_prompts!inner(id, prompt, image_url)') // <-- FIX 1: Select 'prompt'
-        .order('title');
-
-    if (error) {
-        console.error("Error fetching prompts with join:", error);
-        throw error;
-    }
-
-    if (!data) {
-        return [];
-    }
-
-    // Map the data from the Supabase join (which uses 'example_prompts')
-    // to the app's 'PromptCategory' type (which uses 'prompts')
-    const result: PromptCategory[] = data.map((category) => ({
-        id: category.id,
-        title: category.title,
-        // The 'example_prompts' array is already nested by Supabase.
-        // We just need to map its contents to the 'Prompt' type.
-        prompts: (category.example_prompts as any[]).map((prompt: any) => ({
-            id: prompt.id,
-            text: prompt.prompt, // <-- FIX 2: Map 'prompt' to 'text'
-            imageUrl: prompt.image_url,
-        })),
-    }));
-
-    return result;
+    const { filePath } = await response.json();
+    return filePath;
 };
 
 /**
- * Adds a new example prompt to the database.
+ * Deletes an image file from the local server.
+ * @param imageUrl The local URL of the image to delete.
  */
-export const addPrompt = async (prompt: { text: string; imageFile: File | null }, categoryTitle: string): Promise<PromptCategory[]> => {
-    let { data: category } = await supabase
-        .from('prompt_categories')
-        .select('id')
-        .eq('title', categoryTitle)
-        .single();
-
-    if (!category) {
-        const { data: newCategory, error: newCategoryError } = await supabase
-            .from('prompt_categories')
-            .insert({ title: categoryTitle })
-            .select('id')
-            .single();
-        if (newCategoryError) throw newCategoryError;
-        category = newCategory;
+const deleteImageFromServer = async (imageUrl: string): Promise<void> => {
+    // Only attempt to delete local images served from our server
+    if (!imageUrl.startsWith('/prompt-images/')) {
+        console.warn(`Skipping deletion for non-local image URL: ${imageUrl}`);
+        return;
     }
-    if (!category) throw new Error("Could not find or create category");
 
-    let imageUrl: string | null = null;
-    if (prompt.imageFile) {
-        imageUrl = await fileToDataUrl(prompt.imageFile);
-    }
-    
-    await supabase
-        .from('example_prompts')
-        .insert({
-            category_id: category.id,
-            prompt: prompt.text, // <-- FIX 3: Insert into 'prompt'
-            image_url: imageUrl,
+    try {
+        const response = await fetch('/prompt-images-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filePath: imageUrl }),
         });
 
-    return getPrompts();
+        if (!response.ok) {
+            // Log but don't throw, to avoid blocking DB ops on a file system failure
+            const errorData = await response.json().catch(() => ({}));
+            console.error(`Failed to delete image from server: ${imageUrl}`, errorData);
+        }
+    } catch (error) {
+        console.error(`Error during fetch to delete image: ${imageUrl}`, error);
+    }
 };
 
 /**
- * Updates an example prompt in the database.
+ * Fetches all prompt categories and their prompts from the local server's JSON file.
+ */
+export const getPrompts = async (): Promise<PromptCategory[]> => {
+    try {
+        const response = await fetch('/api/prompts');
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Server responded with error:', errorText);
+            throw new Error('Failed to fetch prompts from server.');
+        }
+        const data = await response.json();
+        return data || [];
+    } catch (error) {
+        console.error("Error fetching prompts:", error);
+        throw error;
+    }
+};
+
+/**
+ * Adds a new example prompt by calling the server API.
+ */
+export const addPrompt = async (prompt: { text: string; imageFile: File | null }, categoryTitle: string): Promise<PromptCategory[]> => {
+    let imageUrl: string | null = null;
+    try {
+        if (prompt.imageFile) {
+            imageUrl = await uploadImageToServer(prompt.imageFile);
+        }
+        
+        const response = await fetch('/api/prompts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text: prompt.text,
+                imageUrl,
+                categoryTitle,
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error('Server failed to add prompt.');
+        }
+
+        return await response.json();
+    } catch (error) {
+        // If the API call fails after an image was uploaded, try to clean it up.
+        if (imageUrl) {
+            await deleteImageFromServer(imageUrl);
+        }
+        console.error("Error adding prompt:", error);
+        throw error;
+    }
+};
+
+/**
+ * Updates an example prompt by calling the server API.
  */
 export const updatePrompt = async (
     promptId: string,
     updates: { text: string; categoryTitle: string; imageFile: File | null; removeImage: boolean },
     originalImageUrl: string | null
 ): Promise<PromptCategory[]> => {
-    let { data: category } = await supabase
-        .from('prompt_categories')
-        .select('id')
-        .eq('title', updates.categoryTitle)
-        .single();
-    if (!category) {
-        const { data: newCategory, error: newCategoryError } = await supabase
-            .from('prompt_categories')
-            .insert({ title: updates.categoryTitle })
-            .select('id')
-            .single();
-        if (newCategoryError) throw newCategoryError;
-        category = newCategory;
-    }
-    if (!category) throw new Error("Could not find or create category");
-
     let newImageUrl = originalImageUrl;
+
+    // If we're removing the image OR uploading a new one, delete the old one first.
+    if ((updates.removeImage || updates.imageFile) && originalImageUrl) {
+        await deleteImageFromServer(originalImageUrl);
+    }
+
     if (updates.removeImage) {
         newImageUrl = null;
     } else if (updates.imageFile) {
-        newImageUrl = await fileToDataUrl(updates.imageFile);
+        newImageUrl = await uploadImageToServer(updates.imageFile);
     }
 
-    await supabase
-        .from('example_prompts')
-        .update({
-            prompt: updates.text, // <-- FIX 4: Update 'prompt'
-            category_id: category.id,
-            image_url: newImageUrl,
-        })
-        .eq('id', promptId);
+    const response = await fetch(`/api/prompts/${promptId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            text: updates.text,
+            categoryTitle: updates.categoryTitle,
+            imageUrl: newImageUrl,
+        }),
+    });
     
-    return getPrompts();
+    if (!response.ok) {
+        // Note: Rolling back image changes on failure is complex here.
+        // The main goal is to log the error for the admin.
+        console.error("Failed to update prompt. Server response:", await response.text());
+        throw new Error("Could not update the prompt on the server.");
+    }
+    
+    return await response.json();
 };
 
 /**
- * Deletes an example prompt from the database.
+ * Deletes an example prompt by calling the server API.
+ * The server is responsible for deleting the associated image file.
  */
 export const deletePrompt = async (promptId: string): Promise<PromptCategory[]> => {
-    await supabase
-        .from('example_prompts')
-        .delete()
-        .eq('id', promptId);
+    const response = await fetch(`/api/prompts/${promptId}`, {
+        method: 'DELETE',
+    });
     
-    // Note: This does not automatically delete empty categories. A cleanup task could handle that.
+    if (!response.ok) {
+        console.error("Failed to delete prompt. Server response:", await response.text());
+        throw new Error("Could not delete the prompt on the server.");
+    }
     
-    return getPrompts();
+    return await response.json();
 };
 
 
@@ -349,5 +376,61 @@ export const submitContactForm = async (formData: ContactFormData): Promise<void
     if (error) {
         console.error('Error submitting contact form:', error);
         throw new Error('Could not submit your message. Please try again later.');
+    }
+};
+
+// --- Coupon Management ---
+
+/**
+ * Fetches all coupons. Admin only.
+ */
+export const getCoupons = async (): Promise<Coupon[]> => {
+    const { data, error } = await supabase.from('coupons').select('*');
+    if (error) {
+        console.error("Error fetching coupons:", error);
+        throw error;
+    }
+    return data || [];
+};
+
+/**
+ * Adds a new coupon. Admin only.
+ */
+export const addCoupon = async (couponData: Omit<Coupon, 'id' | 'created_at' | 'times_used'>): Promise<Coupon> => {
+    const { data, error } = await supabase.from('coupons').insert([couponData]).select().single();
+    if (error) {
+        console.error("Error adding coupon:", error);
+        // Provide more specific error for unique constraint violation
+        if (error.code === '23505') {
+            throw new Error(`Coupon code "${couponData.code}" already exists.`);
+        }
+        throw error;
+    }
+    return data;
+};
+
+/**
+ * Updates a coupon. Admin only.
+ */
+export const updateCoupon = async (couponId: number, updates: Partial<Coupon>): Promise<Coupon> => {
+    const { data, error } = await supabase.from('coupons').update(updates).eq('id', couponId).select().single();
+    if (error) {
+        console.error("Error updating coupon:", error);
+         if (error.code === '23505') {
+            throw new Error(`Coupon code "${updates.code}" already exists.`);
+        }
+        throw error;
+    }
+    return data;
+};
+
+/**
+ * Deletes a coupon. Admin only.
+ */
+export const deleteCoupon = async (couponId: number): Promise<void> => {
+    const { error } = await supabase.from('coupons').delete().eq('id', couponId);
+    if (error) {
+        console.error("Error deleting coupon:", error);
+        throw error;
     }
 };

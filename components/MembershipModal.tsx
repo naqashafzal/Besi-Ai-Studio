@@ -1,13 +1,15 @@
 
 
-import React, { useMemo } from 'react';
-import { XMarkIcon, StarIcon, SparklesIcon } from './Icons';
-import { Plan, PaymentSettings, UserProfile, PlanCountryPrice } from '../types';
+
+import React, { useMemo, useState } from 'react';
+import { XMarkIcon, StarIcon, SparklesIcon, TicketIcon } from './Icons';
+import { Plan, PaymentSettings, UserProfile, PlanCountryPrice, Coupon } from '../types';
+import * as couponService from '../services/couponService';
 
 interface MembershipModalProps {
   plan: Plan;
   onClose: () => void;
-  onUpgrade: () => Promise<void>;
+  onUpgrade: (couponCode?: string) => Promise<void>;
   country?: string | null;
   paymentSettings: PaymentSettings | null;
   profile: UserProfile | null;
@@ -15,7 +17,11 @@ interface MembershipModalProps {
 }
 
 const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgrade, country, paymentSettings, profile, planCountryPrices }) => {
-    const [isUpgrading, setIsUpgrading] = React.useState(false);
+    const [isUpgrading, setIsUpgrading] = useState(false);
+    const [couponCode, setCouponCode] = useState('');
+    const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
+    const [couponError, setCouponError] = useState<string | null>(null);
+    const [isVerifyingCoupon, setIsVerifyingCoupon] = useState(false);
     
     const displayedPlan = useMemo(() => {
         const planWithCurrency = { ...plan, currency: 'USD' };
@@ -33,6 +39,20 @@ const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgr
         return planWithCurrency;
     }, [plan, country, planCountryPrices]);
 
+    const discountedPrice = useMemo(() => {
+        if (!appliedCoupon) return null;
+        const originalPrice = displayedPlan.price;
+        if (appliedCoupon.discount_type === 'fixed') {
+            return Math.max(0, originalPrice - appliedCoupon.discount_value);
+        }
+        if (appliedCoupon.discount_type === 'percentage') {
+            return originalPrice * (1 - appliedCoupon.discount_value / 100);
+        }
+        return null;
+    }, [appliedCoupon, displayedPlan.price]);
+    
+    const finalPrice = discountedPrice !== null ? discountedPrice : displayedPlan.price;
+
     const isPakistan = country === 'Pakistan';
     const canPayManually = isPakistan && !!paymentSettings?.manual_payment_instructions_pk;
     const isAdmin = profile?.role === 'admin';
@@ -40,10 +60,37 @@ const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgr
     const handleUpgradeClick = async () => {
         setIsUpgrading(true);
         try {
-            await onUpgrade();
+            await onUpgrade(appliedCoupon?.code);
         } finally {
             setIsUpgrading(false);
         }
+    };
+
+    const handleApplyCoupon = async () => {
+        if (!couponCode.trim()) {
+            setCouponError("Please enter a coupon code.");
+            return;
+        }
+        setIsVerifyingCoupon(true);
+        setCouponError(null);
+        setAppliedCoupon(null);
+        try {
+            const result = await couponService.validateCoupon(couponCode);
+            if (result.error) {
+                throw new Error(result.error);
+            }
+            setAppliedCoupon(result);
+        } catch (error) {
+            setCouponError(error instanceof Error ? error.message : "An unknown error occurred.");
+        } finally {
+            setIsVerifyingCoupon(false);
+        }
+    };
+    
+    const handleRemoveCoupon = () => {
+        setAppliedCoupon(null);
+        setCouponCode('');
+        setCouponError(null);
     };
 
     const renderPaymentAction = () => {
@@ -70,9 +117,9 @@ const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgr
                 <input type="hidden" name="cmd" value="_xclick" />
                 <input type="hidden" name="business" value="haintsblue@gmail.com" />
                 <input type="hidden" name="item_name" value={`BestAI Pro Membership - User: ${profile?.email || profile?.id}`} />
-                <input type="hidden" name="amount" value={displayedPlan.price.toFixed(2)} />
+                <input type="hidden" name="amount" value={finalPrice.toFixed(2)} />
                 <input type="hidden" name="currency_code" value={(displayedPlan as any).currency || 'USD'} />
-                <input type="hidden" name="return" value={`${window.location.origin}${window.location.pathname}?paypal_success=true&plan=pro`} />
+                <input type="hidden" name="return" value={`${window.location.origin}${window.location.pathname}?paypal_success=true&plan=pro&coupon=${appliedCoupon?.code || ''}`} />
                 <input type="hidden" name="cancel_return" value={`${window.location.origin}${window.location.pathname}`} />
                 <input type="hidden" name="custom" value={profile?.id || ''} />
                 
@@ -162,10 +209,54 @@ const MembershipModal: React.FC<MembershipModalProps> = ({ plan, onClose, onUpgr
                     </div>
                 </div>
 
+                <div className="bg-background p-4 rounded-lg border border-border">
+                    {appliedCoupon ? (
+                        <div className="animate-fade-in">
+                            <div className="flex justify-between items-center">
+                                <p className="text-sm font-semibold text-green-400 flex items-center gap-2">
+                                    <TicketIcon className="w-5 h-5"/>
+                                    Coupon Applied: {appliedCoupon.code}
+                                </p>
+                                <button onClick={handleRemoveCoupon} className="text-xs text-red-400 hover:underline">Remove</button>
+                            </div>
+                            <p className="text-sm text-text-secondary mt-1">
+                                {appliedCoupon.discount_type === 'percentage' ? `${appliedCoupon.discount_value}% off applied.` : `$${appliedCoupon.discount_value} off applied.`}
+                            </p>
+                        </div>
+                    ) : (
+                        <div>
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={couponCode}
+                                    onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                                    placeholder="Enter Coupon Code"
+                                    className="flex-grow p-2 bg-panel-light border border-border rounded-lg text-sm"
+                                    disabled={isVerifyingCoupon}
+                                />
+                                <button
+                                    onClick={handleApplyCoupon}
+                                    disabled={isVerifyingCoupon}
+                                    className="px-4 py-2 bg-brand-secondary/20 text-brand-secondary font-semibold rounded-md hover:bg-brand-secondary/30 transition-colors text-sm disabled:opacity-50"
+                                >
+                                    {isVerifyingCoupon ? '...' : 'Apply'}
+                                </button>
+                            </div>
+                            {couponError && <p className="text-red-400 text-xs mt-2 text-center">{couponError}</p>}
+                        </div>
+                    )}
+                </div>
+
+
                  <div className="text-center">
+                    {discountedPrice !== null && (
+                         <p className="text-lg text-text-secondary line-through">
+                             {displayedPlan.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                         </p>
+                    )}
                     <p className="text-4xl font-extrabold text-text-primary">
                         {(displayedPlan as any).currency === 'USD' ? '$' : ''}
-                        {displayedPlan.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {finalPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         {(displayedPlan as any).currency !== 'USD' ? ` ${(displayedPlan as any).currency}` : ''}
                         <span className="text-lg font-medium text-text-secondary">/month</span>
                     </p>

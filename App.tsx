@@ -1,9 +1,10 @@
 
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { GenerationState, GenerativePart, PromptCategory, Prompt, Session, UserProfile, VisitorProfile, Plan, PaymentSettings, PlanCountryPrice, ContactFormData, ChatMessage } from './types';
+import { GenerationState, GenerativePart, PromptCategory, Prompt, Session, UserProfile, VisitorProfile, Plan, PaymentSettings, PlanCountryPrice, ContactFormData, ChatMessage, Coupon } from './types';
 import { generateImage, generateMultiPersonImage, generatePromptFromImage, createChat, generateVideo } from './services/geminiService';
 import * as adminService from './services/adminService';
+import * as couponService from './services/couponService';
 import { supabase } from './services/supabaseClient';
 import { DEFAULT_PLANS, VIDEO_LOADING_MESSAGES } from './constants';
 import { SparklesIcon, PhotoIcon, UsersIcon, StarIcon, MailIcon, XMarkIcon, ChatBubbleLeftRightIcon, VideoCameraIcon } from './components/Icons';
@@ -20,15 +21,10 @@ import ChatBox from './components/ChatBox';
 import VideoPlayer from './components/VideoPlayer';
 import HistoryDisplay from './components/HistoryDisplay';
 import { Chat } from '@google/genai';
-import { fileToGenerativePart } from './utils/fileHelpers';
+import { fileToGenerativePart, dataUrlToFile } from './utils/fileHelpers';
 import ContactModal from './components/ContactModal';
 
 
-const dataUrlToFile = async (dataUrl: string, filename: string): Promise<File> => {
-    const res = await fetch(dataUrl);
-    const blob = await res.blob();
-    return new File([blob], filename, { type: blob.type });
-};
 
 const App: React.FC = () => {
   const [prompt, setPrompt] = useState<string>('');
@@ -46,6 +42,7 @@ const App: React.FC = () => {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [planCountryPrices, setPlanCountryPrices] = useState<PlanCountryPrice[]>([]);
   const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
 
   // Generation Mode
   const [generationMode, setGenerationMode] = useState<'single' | 'multi' | 'video'>('single');
@@ -102,8 +99,13 @@ const App: React.FC = () => {
   // History state
   const [historyImageUrls, setHistoryImageUrls] = useState<string[]>([]);
 
-  const IMAGE_CREDIT_COST = 1;
-  const VIDEO_CREDIT_COST = 5;
+  // --- Credit Costs ---
+  const STANDARD_IMAGE_CREDIT_COST = 10;
+  const HD_IMAGE_CREDIT_COST = 20;
+  const PROMPT_FROM_IMAGE_CREDIT_COST = 2;
+  const CHAT_CREDIT_COST = 1;
+  const VIDEO_CREDIT_COST = 250;
+
 
   // Auth Effect
   useEffect(() => {
@@ -194,7 +196,7 @@ const App: React.FC = () => {
                 setGenerationState(GenerationState.SUCCESS);
                 setHistoryImageUrls(prev => [...imageUrls, ...prev]);
 
-                const newCredits = (visitorProfile?.credits ?? 1) - 1;
+                const newCredits = (visitorProfile?.credits ?? 1) - STANDARD_IMAGE_CREDIT_COST;
                 updateUserCredits(newCredits);
             } catch (err) {
                 console.error(err);
@@ -263,27 +265,57 @@ const App: React.FC = () => {
   // Profile & Credits Effect
   useEffect(() => {
     const getProfile = async () => {
-      if (session?.user) {
+      if (!session?.user) {
+        setProfile(null);
+        return;
+      }
+
+      // Helper to fetch profile, will be used for initial fetch and retry
+      const fetchUserProfile = async () => {
         const { data, error } = await supabase
           .from('profiles')
           .select('id, email, credits, plan, role, credits_reset_at, phone, country')
           .eq('id', session.user.id)
-          .single();
-
+          .maybeSingle();
         if (error) {
           console.error('Error fetching profile:', error);
+        }
+        return { data, error };
+      };
+
+      // 1. Try to fetch the profile
+      let { data: existingProfile, error: fetchError } = await fetchUserProfile();
+
+      if (fetchError) {
+          setError("A problem occurred while loading your profile. Please refresh the page.");
           setProfile(null);
           return;
-        }
+      }
 
-        if (data) {
-          // Check for credit renewal
-          const lastReset = new Date(data.credits_reset_at);
+      // 2. If not found, retry after a delay (for DB trigger replication)
+      if (!existingProfile) {
+        console.warn("Profile not found for user. Retrying after a delay...");
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const { data: retriedProfile, error: retryError } = await fetchUserProfile();
+        
+        if (retryError) {
+            setError("A problem occurred while loading your profile. Please refresh the page.");
+            setProfile(null);
+            return;
+        }
+        existingProfile = retriedProfile;
+      }
+
+      // 3. Process the profile if it exists, otherwise show an error
+      if (existingProfile) {
+        // 4. Check for credit renewal for PRO users
+        if (existingProfile.plan === 'pro' && existingProfile.credits_reset_at) {
+          const lastReset = new Date(existingProfile.credits_reset_at);
           const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
           if (lastReset < thirtyDaysAgo) {
-            const planDetails = plans.find(p => p.name === data.plan);
-            const creditsToSet = planDetails ? planDetails.credits_per_month : (data.plan === 'pro' ? 1000 : 80);
+            const planDetails = plans.find(p => p.name === 'pro');
+            const creditsToSet = planDetails ? planDetails.credits_per_month : 2500;
             
             const { data: updatedProfile, error: updateError } = await supabase
               .from('profiles')
@@ -291,23 +323,31 @@ const App: React.FC = () => {
               .eq('id', session.user.id)
               .select('id, email, credits, plan, role, credits_reset_at, phone, country')
               .single();
-            
+
             if (updateError) {
               console.error("Error renewing credits:", updateError);
-              setProfile(data); // Set old data on error
+              setProfile(existingProfile); // On error, use the stale profile data
             } else {
-              setProfile(updatedProfile); // Set renewed data
+              setProfile(updatedProfile); 
             }
-          } else {
-            setProfile(data); // Set current data
+            return; // Finished
           }
         }
+        // If not a pro user needing renewal, just set the existing profile
+        setProfile(existingProfile);
+
       } else {
+        // 5. Profile still doesn't exist. The DB trigger likely failed.
+        console.error("Fatal: Profile could not be found after retry. The database trigger may be misconfigured or has failed.");
+        setError("Your user account could not be initialized correctly. Please contact support for assistance.");
         setProfile(null);
       }
     };
-    if (plans.length > 0) { // Only fetch profile once plans are loaded
-        getProfile();
+
+    if (session && plans.length > 0) {
+      getProfile();
+    } else if (!session) {
+      setProfile(null); // Clear profile on logout
     }
   }, [session, plans]);
   
@@ -326,15 +366,15 @@ const App: React.FC = () => {
 
     if (!canUsePro) {
         if (aspectRatio !== '1:1') setAspectRatio('1:1');
-        if (imageSize !== '1024') setImageSize('1024');
+        if (imageSize !== '2048') setImageSize('1024');
     }
 
     if (!canUseAdmin && generationMode === 'video') {
         handleModeChange('single');
     }
-  }, [profile, session, generationMode, handleModeChange]);
+  }, [profile, session, generationMode, handleModeChange, aspectRatio, imageSize]);
 
-  const handleUpgradeToPro = useCallback(async () => {
+  const handleUpgradeToPro = useCallback(async (couponCode?: string) => {
     if (!session?.user) return;
     const proPlan = plans.find(p => p.name === 'pro');
     if (!proPlan) {
@@ -355,6 +395,11 @@ const App: React.FC = () => {
             .single();
 
         if (error) throw error;
+        
+        if (couponCode) {
+            await couponService.incrementCouponUsage(couponCode);
+        }
+        
         if (data) {
             setProfile(data);
             setIsMembershipModalOpen(false);
@@ -371,8 +416,9 @@ const App: React.FC = () => {
         const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.get('paypal_success') === 'true' && session) {
             const plan = urlParams.get('plan');
+            const coupon = urlParams.get('coupon');
             if (plan === 'pro') {
-                await handleUpgradeToPro();
+                await handleUpgradeToPro(coupon || undefined);
             }
             // Clean URL
             const newUrl = `${window.location.pathname}`;
@@ -396,7 +442,7 @@ const App: React.FC = () => {
           setSelectedCategory('');
         }
       } catch (error) {
-        console.error("Failed to fetch example prompts from Supabase:", error);
+        console.error("Failed to fetch example prompts:", error);
         setError("Could not load example prompts. Please check your connection and try again.");
       } finally {
         setPromptsLoading(false);
@@ -430,8 +476,12 @@ const App: React.FC = () => {
     const fetchAdminData = async () => {
         if (isAdminPanelOpen && profile?.role === 'admin') {
             try {
-                const users = await adminService.getUsers();
+                const [users, fetchedCoupons] = await Promise.all([
+                    adminService.getUsers(),
+                    adminService.getCoupons()
+                ]);
                 setAllUsers(users);
+                setCoupons(fetchedCoupons);
                 // Plans, prices and settings are already fetched globally
             } catch (error) {
                 console.error("Error fetching admin data:", error);
@@ -482,7 +532,7 @@ const App: React.FC = () => {
   const currentCredits = session ? profile?.credits : visitorProfile?.credits;
   
   const handleGeneratePromptFromImage = async () => {
-    if ((currentCredits ?? 0) < IMAGE_CREDIT_COST) {
+    if ((currentCredits ?? 0) < PROMPT_FROM_IMAGE_CREDIT_COST) {
         setError("You don't have enough credits.");
         if (!session) setAuthModalView('sign_up');
         return;
@@ -498,7 +548,7 @@ const App: React.FC = () => {
         const generatedPrompt = await generatePromptFromImage(imagePart, promptFocus, promptKeywords);
         setPrompt(generatedPrompt);
         
-        const newCredits = (currentCredits ?? 0) - IMAGE_CREDIT_COST;
+        const newCredits = (currentCredits ?? 0) - PROMPT_FROM_IMAGE_CREDIT_COST;
         if (session) {
             const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', session.user.id).select().single();
             if(data) setProfile(p => p ? {...p, credits: data.credits} : null);
@@ -515,8 +565,10 @@ const App: React.FC = () => {
   };
 
   const handleGenerateImage = useCallback(async () => {
-    if ((currentCredits ?? 0) < IMAGE_CREDIT_COST) {
-      setError("You're out of credits. Sign up for 80 more!");
+    const cost = imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST;
+
+    if ((currentCredits ?? 0) < cost) {
+      setError("You're out of credits. Sign up for more!");
       if (!session) setAuthModalView('sign_up');
       return;
     }
@@ -549,7 +601,7 @@ const App: React.FC = () => {
           setGenerationState(GenerationState.SUCCESS);
           setHistoryImageUrls(prev => [...imageUrls, ...prev]);
 
-          const newCredits = (currentCredits ?? 0) - IMAGE_CREDIT_COST;
+          const newCredits = (currentCredits ?? 0) - cost;
           const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', session.user.id).select().single();
           if (data) setProfile(p => p ? {...p, credits: data.credits} : null);
 
@@ -571,7 +623,9 @@ const App: React.FC = () => {
   }, [prompt, uploadedImage, session, profile, visitorProfile, currentCredits, queue, visitorId, imageSize, aspectRatio]);
 
   const handleGenerateMultiPersonImage = useCallback(async () => {
-    if ((currentCredits ?? 0) < IMAGE_CREDIT_COST) {
+    const cost = imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST;
+    
+    if ((currentCredits ?? 0) < cost) {
         setError("You're out of credits.");
         if (!session) setAuthModalView('sign_up');
         return;
@@ -606,7 +660,7 @@ const App: React.FC = () => {
         setGenerationState(GenerationState.SUCCESS);
         setHistoryImageUrls(prev => [...imageUrls, ...prev]);
 
-        const newCredits = (currentCredits ?? 0) - IMAGE_CREDIT_COST;
+        const newCredits = (currentCredits ?? 0) - cost;
         const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', session.user.id).select().single();
         if (data) setProfile(p => p ? {...p, credits: data.credits} : null);
 
@@ -689,7 +743,9 @@ const App: React.FC = () => {
     if (p.imageUrl) {
       try {
         setError(null); // Clear previous errors
-        const file = await dataUrlToFile(p.imageUrl, 'example-image.png');
+        // Check if it's a full URL or a local path
+        const imageUrl = p.imageUrl.startsWith('http') ? p.imageUrl : `${window.location.origin}${p.imageUrl}`;
+        const file = await dataUrlToFile(imageUrl, 'example-image.png');
         handleImageChange(file);
       } catch (e) {
         console.error("Failed to load example image", e);
@@ -717,8 +773,7 @@ const App: React.FC = () => {
   const handleSendMessage = async (message: string) => {
     if (!chatSession || !profile) return;
     
-    const requiredCredits = 1;
-    if ((currentCredits ?? 0) < requiredCredits) {
+    if ((currentCredits ?? 0) < CHAT_CREDIT_COST) {
         setChatError("You don't have enough credits to chat.");
         return;
     }
@@ -731,7 +786,7 @@ const App: React.FC = () => {
         const response = await chatSession.sendMessage({ message });
         setChatMessages(prev => [...prev, { role: 'model', text: response.text }]);
         
-        const newCredits = profile.credits - requiredCredits;
+        const newCredits = profile.credits - CHAT_CREDIT_COST;
         const { data } = await supabase.from('profiles').update({ credits: newCredits }).eq('id', profile.id).select().single();
         if (data) setProfile(p => p ? {...p, credits: data.credits} : null);
         
@@ -814,6 +869,21 @@ const App: React.FC = () => {
   const handleAdminDeletePlanCountryPrice = async (priceId: number) => {
     await adminService.deletePlanCountryPrice(priceId);
     setPlanCountryPrices(prev => prev.filter(p => p.id !== priceId));
+  };
+
+  const handleAdminAddCoupon = async (couponData: Omit<Coupon, 'id' | 'created_at' | 'times_used'>) => {
+    const newCoupon = await adminService.addCoupon(couponData);
+    setCoupons(prev => [...prev, newCoupon]);
+  };
+
+  const handleAdminUpdateCoupon = async (couponId: number, updates: Partial<Coupon>) => {
+    const updatedCoupon = await adminService.updateCoupon(couponId, updates);
+    setCoupons(prev => prev.map(c => c.id === couponId ? updatedCoupon : c));
+  };
+    
+  const handleAdminDeleteCoupon = async (couponId: number) => {
+    await adminService.deleteCoupon(couponId);
+    setCoupons(prev => prev.filter(c => c.id !== couponId));
   };
 
   const handlePlanSelection = (planName: string) => {
@@ -920,17 +990,23 @@ const App: React.FC = () => {
         return `Generate Video (${VIDEO_CREDIT_COST} Credits)`;
     }
     
-    if ((currentCredits ?? 0) < IMAGE_CREDIT_COST) return 'Out of Credits';
-    return `Generate Image (${IMAGE_CREDIT_COST} Credit)`;
+    const cost = imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST;
+    if ((currentCredits ?? 0) < cost) return 'Out of Credits';
+    return `Generate Image (${cost} Credits)`;
   };
   
   const renderCreditWarning = () => {
-    if ((currentCredits ?? 0) >= 1 || isGenerating || isQueued) return null;
+    const cost = imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST;
+    if ((currentCredits ?? 0) >= cost || isGenerating || isQueued) return null;
+
     const freePlan = plans.find(p => p.name === 'free');
-    const freeCredits = freePlan ? freePlan.credits_per_month : 80;
+    const freeCredits = freePlan ? freePlan.credits_per_month : 50;
 
     if (session && profile) {
-        return <p className="text-amber-400 text-sm text-center mt-3">You're out of credits. Your credits will renew monthly.</p>;
+        if (profile.plan === 'pro') {
+            return <p className="text-amber-400 text-sm text-center mt-3">You're out of credits. Your credits will renew monthly.</p>;
+        }
+        return <p className="text-amber-400 text-sm text-center mt-3">You're out of credits. <button onClick={() => setIsMembershipModalOpen(true)} className="font-bold underline hover:text-amber-300">Upgrade to Pro</button> for more.</p>;
     } else {
         return (
             <p className="text-amber-400 text-sm text-center mt-3">
@@ -964,6 +1040,7 @@ const App: React.FC = () => {
           prompts={examplePrompts}
           paymentSettings={paymentSettings}
           planCountryPrices={planCountryPrices}
+          coupons={coupons}
           onAddPrompt={handleAddPrompt}
           onRemovePrompt={handleRemovePrompt}
           onUpdatePrompt={handleUpdatePrompt}
@@ -974,6 +1051,9 @@ const App: React.FC = () => {
           onAddPlanCountryPrice={handleAdminAddPlanCountryPrice}
           onUpdatePlanCountryPrice={handleAdminUpdatePlanCountryPrice}
           onDeletePlanCountryPrice={handleAdminDeletePlanCountryPrice}
+          onAddCoupon={handleAdminAddCoupon}
+          onUpdateCoupon={handleAdminUpdateCoupon}
+          onDeleteCoupon={handleAdminDeleteCoupon}
           onClose={() => setIsAdminPanelOpen(false)}
         />
       )}
@@ -1122,11 +1202,11 @@ const App: React.FC = () => {
                         </div>
                         <button
                             onClick={handleGeneratePromptFromImage}
-                            disabled={isGenerating || isQueued || isGeneratingPrompt || !promptGenImage || (currentCredits ?? 0) < IMAGE_CREDIT_COST}
+                            disabled={isGenerating || isQueued || isGeneratingPrompt || !promptGenImage || (currentCredits ?? 0) < PROMPT_FROM_IMAGE_CREDIT_COST}
                             className="w-full flex items-center justify-center py-3 px-4 bg-panel-light text-text-primary font-semibold rounded-lg shadow-md hover:bg-border transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <PhotoIcon className="w-5 h-5 mr-2" />
-                            {isGeneratingPrompt ? `Analyzing... (${IMAGE_CREDIT_COST} Credit)` : `Generate Prompt (${IMAGE_CREDIT_COST} Credit)`}
+                            {isGeneratingPrompt ? `Analyzing... (${PROMPT_FROM_IMAGE_CREDIT_COST} Credits)` : `Generate Prompt (${PROMPT_FROM_IMAGE_CREDIT_COST} Credits)`}
                         </button>
                     </div>
                     </div>
@@ -1336,8 +1416,8 @@ const App: React.FC = () => {
                 onClick={generationMode === 'video' ? handleGenerateVideo : (generationMode === 'multi' ? handleGenerateMultiPersonImage : handleGenerateImage)}
                 disabled={isGenerating || isQueued || 
                     (generationMode === 'video' && (!prompt.trim() || (currentCredits ?? 0) < VIDEO_CREDIT_COST || !session)) ||
-                    (generationMode === 'single' && (!prompt.trim() || !imageDataUrl || (currentCredits ?? 0) < IMAGE_CREDIT_COST)) ||
-                    (generationMode === 'multi' && (!prompt.trim() || !imageDataUrl || !imageDataUrlTwo || (currentCredits ?? 0) < IMAGE_CREDIT_COST))
+                    (generationMode === 'single' && (!prompt.trim() || !imageDataUrl || (currentCredits ?? 0) < (imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST))) ||
+                    (generationMode === 'multi' && (!prompt.trim() || !imageDataUrl || !imageDataUrlTwo || (currentCredits ?? 0) < (imageSize === '2048' ? HD_IMAGE_CREDIT_COST : STANDARD_IMAGE_CREDIT_COST)))
                 }
                 className="w-full flex items-center justify-center py-4 px-6 bg-brand text-white font-bold rounded-lg shadow-lg hover:bg-brand-hover transform hover:-translate-y-0.5 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
               >

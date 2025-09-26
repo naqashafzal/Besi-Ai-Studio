@@ -7,6 +7,7 @@
 require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
+const fsp = require('fs').promises;
 const axios = require('axios');
 const https = require('https');
 const path = require('path');
@@ -15,13 +16,13 @@ const { URLSearchParams, URL } = require('url');
 const rateLimit = require('express-rate-limit');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 3001;
 const externalApiBaseUrl = 'https://generativelanguage.googleapis.com';
 const externalWsBaseUrl = 'wss://generativelanguage.googleapis.com';
 // Support either API key env-var variant
 const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
 
-const staticPath = path.join(__dirname,'dist');
+const staticPath = path.join(__dirname, '..', 'dist');
 const publicPath = path.join(__dirname,'public');
 
 
@@ -50,6 +51,251 @@ const proxyLimiter = rateLimit({
         res.status(options.statusCode).send(options.message);
     }
 });
+
+// --- Local Image Storage for Prompts ---
+
+// Define and create the directory for storing prompt images
+const imageUploadDir = path.join(__dirname, 'prompt_images');
+if (!fs.existsSync(imageUploadDir)) {
+    try {
+        fs.mkdirSync(imageUploadDir, { recursive: true });
+        console.log(`Created directory for prompt images at: ${imageUploadDir}`);
+    } catch (error) {
+        console.error(`Failed to create prompt image directory:`, error);
+    }
+}
+
+// Statically serve the images from the new directory
+app.use('/prompt-images', express.static(imageUploadDir));
+
+// Endpoint to handle image uploads
+app.post('/prompt-images-upload', (req, res) => {
+    const { imageData, fileName } = req.body;
+
+    if (!imageData || !fileName) {
+        return res.status(400).json({ error: 'Missing imageData or fileName' });
+    }
+
+    try {
+        // imageData is expected to be a data URL: "data:image/png;base64,iVBORw0KGgo..."
+        // We need to extract the base64 part.
+        const base64Data = imageData.split(';base64,').pop();
+        if (!base64Data) {
+            return res.status(400).json({ error: 'Invalid image data format.' });
+        }
+        
+        // Sanitize filename to prevent directory traversal
+        const safeFileName = path.basename(fileName);
+        const filePath = path.join(imageUploadDir, safeFileName);
+        
+        fs.writeFile(filePath, base64Data, 'base64', (err) => {
+            if (err) {
+                console.error('Error saving image:', err);
+                return res.status(500).json({ error: 'Failed to save image on server.' });
+            }
+            
+            const fileUrl = `/prompt-images/${safeFileName}`;
+            console.log(`Image saved successfully: ${fileUrl}`);
+            res.status(201).json({ filePath: fileUrl });
+        });
+    } catch (error) {
+        console.error('Error processing image upload:', error);
+        res.status(500).json({ error: 'An internal server error occurred.' });
+    }
+});
+
+// Endpoint to handle image deletions
+app.post('/prompt-images-delete', (req, res) => {
+    const { filePath } = req.body; // e.g., /prompt-images/image.png
+
+    if (!filePath) {
+        return res.status(400).json({ error: 'Missing filePath' });
+    }
+
+    try {
+        // Sanitize the path to get just the filename and prevent traversal attacks
+        const fileName = path.basename(filePath);
+        const fullPath = path.join(imageUploadDir, fileName);
+
+        // Security check: ensure the resolved path is still within the upload directory
+        if (!fullPath.startsWith(imageUploadDir)) {
+             return res.status(400).json({ error: 'Invalid file path.' });
+        }
+
+        fs.unlink(fullPath, (err) => {
+            if (err) {
+                // If file not found, it might have been deleted already. That's okay.
+                if (err.code === 'ENOENT') {
+                    console.log(`Attempted to delete non-existent file: ${fileName}`);
+                    return res.status(200).json({ message: 'File not found, assumed deleted.' });
+                }
+                console.error('Error deleting image:', err);
+                return res.status(500).json({ error: 'Failed to delete image from server.' });
+            }
+            
+            console.log(`Image deleted successfully: ${fileName}`);
+            res.status(200).json({ message: 'Image deleted successfully.' });
+        });
+    } catch (error) {
+        console.error('Error processing image deletion:', error);
+        res.status(500).json({ error: 'An internal server error occurred.' });
+    }
+});
+
+// --- API for Prompts from JSON file ---
+
+const promptsFilePath = path.join(__dirname, 'prompts.json');
+
+const readPrompts = async () => {
+    try {
+        const data = await fsp.readFile(promptsFilePath, 'utf8');
+        return JSON.parse(data);
+    } catch (error) {
+        if (error.code === 'ENOENT') {
+            await writePrompts([]); // Create file if it doesn't exist
+            return [];
+        }
+        console.error("Error reading prompts.json:", error);
+        throw new Error("Could not read prompts data.");
+    }
+};
+
+const writePrompts = async (data) => {
+    try {
+        await fsp.writeFile(promptsFilePath, JSON.stringify(data, null, 2), 'utf8');
+    } catch (error) {
+        console.error("Error writing to prompts.json:", error);
+        throw new Error("Could not save prompts data.");
+    }
+};
+
+app.get('/api/prompts', async (req, res) => {
+    try {
+        const prompts = await readPrompts();
+        res.json(prompts);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/prompts', async (req, res) => {
+    try {
+        const { text, imageUrl, categoryTitle } = req.body;
+        if (!text || !categoryTitle) {
+            return res.status(400).json({ error: 'Prompt text and category title are required.' });
+        }
+
+        const promptsData = await readPrompts();
+        let category = promptsData.find(c => c.title.toLowerCase() === categoryTitle.toLowerCase());
+
+        if (!category) {
+            category = {
+                id: `cat-${Date.now()}`,
+                title: categoryTitle,
+                prompts: []
+            };
+            promptsData.push(category);
+        }
+
+        const newPrompt = {
+            id: `prompt-${Date.now()}`,
+            text,
+            imageUrl: imageUrl || null
+        };
+        category.prompts.push(newPrompt);
+
+        await writePrompts(promptsData);
+        res.status(201).json(promptsData);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.put('/api/prompts/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { text, categoryTitle, imageUrl } = req.body;
+        if (!text || !categoryTitle) {
+            return res.status(400).json({ error: 'Prompt text and category title are required.' });
+        }
+
+        const promptsData = await readPrompts();
+        let promptFound = false;
+        let originalCategory = null;
+        let promptToUpdate = null;
+
+        for (const cat of promptsData) {
+            const promptIndex = cat.prompts.findIndex(p => p.id === id);
+            if (promptIndex !== -1) {
+                promptFound = true;
+                originalCategory = cat;
+                promptToUpdate = cat.prompts[promptIndex];
+                break;
+            }
+        }
+        
+        if (!promptFound || !promptToUpdate || !originalCategory) {
+            return res.status(404).json({ error: 'Prompt not found.' });
+        }
+
+        promptToUpdate.text = text;
+        promptToUpdate.imageUrl = imageUrl;
+
+        if (originalCategory.title.toLowerCase() !== categoryTitle.toLowerCase()) {
+            originalCategory.prompts = originalCategory.prompts.filter(p => p.id !== id);
+            let newCategory = promptsData.find(c => c.title.toLowerCase() === categoryTitle.toLowerCase());
+            if (!newCategory) {
+                newCategory = { id: `cat-${Date.now()}`, title: categoryTitle, prompts: [] };
+                promptsData.push(newCategory);
+            }
+            newCategory.prompts.push(promptToUpdate);
+        }
+
+        const cleanedData = promptsData.filter(c => c.prompts.length > 0);
+        await writePrompts(cleanedData);
+        res.json(cleanedData);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.delete('/api/prompts/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const promptsData = await readPrompts();
+        let promptFound = false;
+        let imageUrlToDelete = null;
+
+        promptsData.forEach(category => {
+            const promptIndex = category.prompts.findIndex(p => p.id === id);
+            if (promptIndex > -1) {
+                promptFound = true;
+                imageUrlToDelete = category.prompts[promptIndex].imageUrl;
+                category.prompts.splice(promptIndex, 1);
+            }
+        });
+
+        if (!promptFound) {
+            return res.status(404).json({ error: 'Prompt not found.' });
+        }
+        
+        const cleanedData = promptsData.filter(c => c.prompts.length > 0);
+        await writePrompts(cleanedData);
+
+        if (imageUrlToDelete) {
+            const fileName = path.basename(imageUrlToDelete);
+            const fullPath = path.join(imageUploadDir, fileName);
+            fsp.unlink(fullPath).catch(err => {
+                console.error(`Async image deletion failed for ${fileName}:`, err.message);
+            });
+        }
+
+        res.json(cleanedData);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 
 // Apply the rate limiter to the /api-proxy route before the main proxy logic
 app.use('/api-proxy', proxyLimiter);

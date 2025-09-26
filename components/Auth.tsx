@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { XMarkIcon } from './Icons';
@@ -34,8 +35,12 @@ const Auth: React.FC<AuthProps> = ({ initialView, onClose }) => {
 
     try {
       if (view === 'sign_in') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        if (!data.session) {
+          // This can happen if the user has not confirmed their email.
+          throw new Error("Login failed. Please check your credentials and confirm your email.");
+        }
         onClose();
       } else { // Sign Up
         const { error } = await supabase.auth.signUp({ 

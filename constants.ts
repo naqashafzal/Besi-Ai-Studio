@@ -20,8 +20,8 @@ export const VIDEO_LOADING_MESSAGES: string[] = [
 ];
 
 export const DEFAULT_PLANS: Plan[] = [
-  { id: 1, name: 'free', price: 0, credits_per_month: 80 },
-  { id: 2, name: 'pro', price: 10, credits_per_month: 1000 },
+  { id: 1, name: 'free', price: 0, credits_per_month: 50 },
+  { id: 2, name: 'pro', price: 5.99, credits_per_month: 2500 },
 ];
 
 export const countryList = [

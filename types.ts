@@ -78,5 +78,19 @@ export interface ChatMessage {
   text: string;
 }
 
+export type DiscountType = 'percentage' | 'fixed';
+
+export interface Coupon {
+    id: number;
+    code: string;
+    discount_type: DiscountType;
+    discount_value: number;
+    expires_at: string | null;
+    max_uses: number | null;
+    times_used: number;
+    is_active: boolean;
+    created_at: string;
+}
+
 
 export type { Session };
