@@ -128,6 +128,144 @@ app.post('/prompt-images-delete', (req, res) => {
     }
 });
 
+// --- Prompts API (using prompts.json) ---
+const promptsFilePath = path.join(__dirname, 'prompts.json');
+
+// Helper function to read prompts from the JSON file
+const readPrompts = () => {
+  try {
+    const data = fs.readFileSync(promptsFilePath, 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    console.error('Error reading prompts file:', error);
+    return [];
+  }
+};
+
+// Helper function to write prompts to the JSON file
+const writePrompts = (prompts) => {
+  try {
+    fs.writeFileSync(promptsFilePath, JSON.stringify(prompts, null, 2), 'utf8');
+  } catch (error) {
+    console.error('Error writing prompts file:', error);
+  }
+};
+
+// API endpoint to get all prompts
+app.get('/api/prompts', (req, res) => {
+  const prompts = readPrompts();
+  res.json(prompts);
+});
+
+// API endpoint to add a new prompt
+app.post('/api/prompts', (req, res) => {
+  const { prompt, categoryTitle } = req.body;
+  const prompts = readPrompts();
+  const categoryIndex = prompts.findIndex(c => c.title === categoryTitle);
+
+  const newPrompt = {
+    id: `prompt-${Date.now()}`,
+    text: prompt.text,
+    imageUrl: prompt.imageUrl || null,
+  };
+
+  if (categoryIndex > -1) {
+    prompts[categoryIndex].prompts.push(newPrompt);
+  } else {
+    prompts.push({
+      id: `cat-${Date.now()}`,
+      title: categoryTitle,
+      prompts: [newPrompt],
+    });
+  }
+
+  writePrompts(prompts);
+  res.status(201).json(prompts);
+});
+
+// API endpoint to update a prompt
+app.put('/api/prompts/:id', (req, res) => {
+    const { id } = req.params;
+    const { updates, categoryTitle } = req.body;
+    const prompts = readPrompts();
+
+    let originalPrompt = null;
+    
+    // Find the prompt and remove it from its original category
+    for (const category of prompts) {
+        const promptIndex = category.prompts.findIndex(p => p.id === id);
+        if (promptIndex > -1) {
+            originalPrompt = category.prompts[promptIndex];
+            category.prompts.splice(promptIndex, 1);
+            break;
+        }
+    }
+
+    if (!originalPrompt) {
+        return res.status(404).json({ message: 'Prompt not found' });
+    }
+    
+    // Create the updated prompt object
+    const updatedPrompt = { ...originalPrompt, ...updates };
+
+    // Find or create the new category and add the prompt
+    let targetCategory = prompts.find(c => c.title === categoryTitle);
+    if (targetCategory) {
+        targetCategory.prompts.push(updatedPrompt);
+    } else {
+        // If category doesn't exist, create it
+        prompts.push({
+            id: `cat-${Date.now()}`,
+            title: categoryTitle,
+            prompts: [updatedPrompt],
+        });
+    }
+
+    // Clean up any categories that may have become empty
+    const finalPrompts = prompts.filter(category => category.prompts.length > 0);
+
+    writePrompts(finalPrompts);
+    res.json(finalPrompts);
+});
+
+// API endpoint to delete a prompt
+app.delete('/api/prompts/:id', (req, res) => {
+  const { id } = req.params;
+  const prompts = readPrompts();
+  let promptFound = false;
+
+  const updatedPrompts = prompts.map(category => {
+    const filteredPrompts = category.prompts.filter(p => {
+      if (p.id === id) {
+        promptFound = true;
+        // If the prompt has an image, delete it from the server
+        if (p.imageUrl) {
+          try {
+              const imagePath = path.join(imageUploadDir, path.basename(p.imageUrl));
+              if (fs.existsSync(imagePath)) {
+                fs.unlinkSync(imagePath);
+                console.log(`Deleted image for prompt ${id}: ${imagePath}`);
+              }
+          } catch(err) {
+              console.error(`Error deleting image file for prompt ${id}:`, err);
+          }
+        }
+        return false; // Exclude this prompt
+      }
+      return true; // Keep this prompt
+    });
+    return { ...category, prompts: filteredPrompts };
+  }).filter(category => category.prompts.length > 0); // Remove empty categories
+
+  if (promptFound) {
+    writePrompts(updatedPrompts);
+    res.json(updatedPrompts);
+  } else {
+    res.status(404).json({ message: 'Prompt not found' });
+  }
+});
+
+
 // Apply the rate limiter to the /api-proxy route before the main proxy logic
 app.use('/api-proxy', proxyLimiter);
 
