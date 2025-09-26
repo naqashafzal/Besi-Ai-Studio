@@ -177,146 +177,185 @@ export const deletePlanCountryPrice = async (priceId: number): Promise<void> => 
     }
 };
 
-// --- Prompt Management ---
+// --- Prompt Management (using Supabase) ---
+
+const PROMPT_IMAGE_BUCKET = 'prompt_images';
 
 /**
- * Deletes an image file from the local server.
- * @param imageUrl The local URL of the image to delete.
+ * Uploads an image to Supabase Storage.
+ * @param imageFile The file to upload.
+ * @returns The public URL of the uploaded image.
  */
-const deleteImageFromServer = async (imageUrl: string): Promise<void> => {
-    if (!imageUrl.startsWith('/prompt-images/')) {
-        console.warn(`Skipping deletion for non-local image URL: ${imageUrl}`);
-        return;
+const uploadImageToSupabase = async (imageFile: File): Promise<string> => {
+    const filePath = `public/${Date.now()}-${imageFile.name}`;
+    const { error: uploadError } = await supabase.storage
+        .from(PROMPT_IMAGE_BUCKET)
+        .upload(filePath, imageFile);
+    
+    if (uploadError) {
+        console.error("Error uploading image to Supabase:", uploadError);
+        throw new Error('Failed to upload image to storage.');
     }
 
-    try {
-        const response = await fetch('/prompt-images-delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filePath: imageUrl }),
-        });
+    const { data } = supabase.storage
+        .from(PROMPT_IMAGE_BUCKET)
+        .getPublicUrl(filePath);
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            console.error(`Failed to delete image from server: ${imageUrl}`, errorData);
+    if (!data.publicUrl) {
+        throw new Error("Could not get public URL for uploaded image.");
+    }
+    
+    return data.publicUrl;
+};
+
+
+/**
+ * Deletes an image file from Supabase Storage.
+ * @param imageUrl The public URL of the image to delete.
+ */
+const deleteImageFromSupabase = async (imageUrl: string): Promise<void> => {
+    try {
+        const url = new URL(imageUrl);
+        // Extracts the path after the bucket name, e.g., 'public/12345-image.png'
+        const filePath = decodeURIComponent(url.pathname.split(`/${PROMPT_IMAGE_BUCKET}/`)[1]);
+
+        if (!filePath) {
+            console.warn(`Could not parse file path from URL: ${imageUrl}`);
+            return;
         }
-    } catch (error) {
-        console.error(`Error during fetch to delete image: ${imageUrl}`, error);
+
+        const { error } = await supabase.storage.from(PROMPT_IMAGE_BUCKET).remove([filePath]);
+        if (error && error.message !== 'The resource was not found') {
+            console.error(`Error deleting image from Supabase Storage: ${filePath}`, error);
+        }
+    } catch (e) {
+        console.error(`An error occurred while trying to delete image from Supabase: ${imageUrl}`, e);
     }
 };
 
 /**
- * Fetches all prompt categories and their prompts from the local server.
+ * Fetches all prompts from the Supabase database and groups them by category.
  */
 export const getPrompts = async (): Promise<PromptCategory[]> => {
-    const response = await fetch('/api/prompts');
-    if (!response.ok) {
-        throw new Error('Failed to fetch prompts from server.');
+    const { data, error } = await supabase
+        .from('prompts')
+        .select('id, text, image_url, category');
+
+    if (error) {
+        console.error("Error fetching prompts from Supabase:", error);
+        throw new Error('Failed to fetch prompts from database.');
     }
-    return await response.json();
-};
 
-/**
- * Adds a new example prompt by sending it to the local server.
- */
-export const addPrompt = async (prompt: { text: string; imageFile: File | null }, categoryTitle: string): Promise<PromptCategory[]> => {
-    let imageUrl: string | null = null;
-    if (prompt.imageFile) {
-        const formData = new FormData();
-        formData.append('promptImage', prompt.imageFile);
+    if (!data) return [];
 
-        const uploadResponse = await fetch('/prompt-images-upload', {
-            method: 'POST',
-            body: formData,
-        });
+    const categoriesMap: Map<string, PromptCategory> = new Map();
 
-        if (!uploadResponse.ok) {
-            throw new Error('Failed to upload image to server.');
+    data.forEach(prompt => {
+        let category = categoriesMap.get(prompt.category);
+        if (!category) {
+            category = {
+                id: `cat-${prompt.category.replace(/\s+/g, '-').toLowerCase()}`,
+                title: prompt.category,
+                prompts: [],
+            };
+            categoriesMap.set(prompt.category, category);
         }
-        const { filePath } = await uploadResponse.json();
-        imageUrl = filePath;
-    }
-
-    const response = await fetch('/api/prompts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            prompt: { text: prompt.text, imageUrl },
-            categoryTitle
-        }),
+        
+        category.prompts.push({
+            id: prompt.id,
+            text: prompt.text,
+            imageUrl: prompt.image_url,
+        });
     });
 
-    if (!response.ok) {
-        if (imageUrl) await deleteImageFromServer(imageUrl); // Cleanup on failure
-        throw new Error('Failed to add prompt.');
-    }
-    return await response.json();
+    return Array.from(categoriesMap.values()).sort((a, b) => a.title.localeCompare(b.title));
 };
 
 /**
- * Updates an example prompt on the local server.
+ * Adds a new example prompt to the Supabase database.
+ */
+export const addPrompt = async (prompt: { text: string; imageFile: File | null }, categoryTitle: string): Promise<void> => {
+    let imageUrl: string | null = null;
+    if (prompt.imageFile) {
+        imageUrl = await uploadImageToSupabase(prompt.imageFile);
+    }
+
+    const { error } = await supabase.from('prompts').insert({
+        text: prompt.text,
+        image_url: imageUrl,
+        category: categoryTitle,
+    });
+
+    if (error) {
+        console.error("Error adding prompt to Supabase:", error);
+        if(imageUrl) await deleteImageFromSupabase(imageUrl); // Clean up uploaded image on DB failure
+        throw new Error('Failed to add prompt.');
+    }
+};
+
+/**
+ * Updates an example prompt in the Supabase database.
  */
 export const updatePrompt = async (
     promptId: string,
     updates: { text: string; categoryTitle: string; imageFile: File | null; removeImage: boolean },
     originalImageUrl: string | null
-): Promise<PromptCategory[]> => {
+): Promise<void> => {
     let newImageUrl = originalImageUrl;
 
-    // If removing image or uploading a new one, delete the old one first
-    if ((updates.removeImage || updates.imageFile) && originalImageUrl) {
-        await deleteImageFromServer(originalImageUrl);
-    }
-
-    if (updates.removeImage) {
+    // Handle image changes
+    if (updates.removeImage && originalImageUrl) {
+        await deleteImageFromSupabase(originalImageUrl);
         newImageUrl = null;
     } else if (updates.imageFile) {
-        const formData = new FormData();
-        formData.append('promptImage', updates.imageFile);
-        const uploadResponse = await fetch('/prompt-images-upload', {
-            method: 'POST',
-            body: formData,
-        });
-        if (!uploadResponse.ok) {
-            throw new Error('Failed to upload new image.');
+        newImageUrl = await uploadImageToSupabase(updates.imageFile);
+        if (originalImageUrl) {
+            await deleteImageFromSupabase(originalImageUrl);
         }
-        const { filePath } = await uploadResponse.json();
-        newImageUrl = filePath;
     }
 
-    const response = await fetch(`/api/prompts/${promptId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            updates: { text: updates.text, imageUrl: newImageUrl },
-            categoryTitle: updates.categoryTitle
-        }),
-    });
+    const { error } = await supabase
+        .from('prompts')
+        .update({
+            text: updates.text,
+            category: updates.categoryTitle,
+            image_url: newImageUrl,
+        })
+        .eq('id', promptId);
 
-    if (!response.ok) {
-        // If the DB update fails, we might have an orphaned new image.
-        // Attempt to clean up the newly uploaded image if the main update fails.
+    if (error) {
+        console.error("Error updating prompt in Supabase:", error);
         if (newImageUrl && newImageUrl !== originalImageUrl) {
-            await deleteImageFromServer(newImageUrl);
+            await deleteImageFromSupabase(newImageUrl);
         }
         throw new Error('Failed to update prompt.');
     }
-
-    return await response.json();
 };
 
 /**
- * Deletes an example prompt from the local server.
+ * Deletes an example prompt from the Supabase database and its image from storage.
  */
-export const deletePrompt = async (promptId: string): Promise<PromptCategory[]> => {
-    const response = await fetch(`/api/prompts/${promptId}`, {
-        method: 'DELETE',
-    });
+export const deletePrompt = async (promptId: string): Promise<void> => {
+    const { data: promptData, error: fetchError } = await supabase
+        .from('prompts')
+        .select('image_url')
+        .eq('id', promptId)
+        .single();
+    
+    if (fetchError) {
+        console.error("Error finding prompt to delete:", fetchError);
+        throw new Error('Failed to find prompt to delete.');
+    }
 
-    if (!response.ok) {
+    const { error: deleteError } = await supabase.from('prompts').delete().eq('id', promptId);
+    if (deleteError) {
+        console.error("Error deleting prompt from DB:", deleteError);
         throw new Error('Failed to delete prompt.');
     }
-    return await response.json();
+    
+    if (promptData?.image_url) {
+        await deleteImageFromSupabase(promptData.image_url);
+    }
 };
 
 

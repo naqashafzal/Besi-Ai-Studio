@@ -13,12 +13,7 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
-        proxy: {
-          '/api': 'http://localhost:3001',
-          '/prompt-images': 'http://localhost:3001',
-          '/prompt-images-upload': 'http://localhost:3001',
-          '/prompt-images-delete': 'http://localhost:3001',
-        }
+        proxy: {}
       },
       plugins: [react()],
       resolve: {

@@ -470,27 +470,29 @@ const App: React.FC = () => {
       handlePaypalSuccess();
     }
 }, [session, handleUpgradeToPro]);
+  
+  const fetchPrompts = useCallback(async () => {
+    setPromptsLoading(true);
+    try {
+      const promptsFromDb = await adminService.getPrompts();
+      setExamplePrompts(promptsFromDb);
+      // Set initial category if not already set
+      if (promptsFromDb && promptsFromDb.length > 0 && !selectedCategory) {
+        setSelectedCategory(promptsFromDb[0].title);
+      } else if (promptsFromDb.length === 0) {
+        setSelectedCategory('');
+      }
+    } catch (error) {
+      console.error("Failed to fetch example prompts:", error);
+      setError("Could not load example prompts. Please check your connection and try again.");
+    } finally {
+      setPromptsLoading(false);
+    }
+  }, [selectedCategory]);
 
   useEffect(() => {
-    const fetchPrompts = async () => {
-      setPromptsLoading(true);
-      try {
-        const promptsFromDb = await adminService.getPrompts();
-        setExamplePrompts(promptsFromDb);
-        if (promptsFromDb && promptsFromDb.length > 0) {
-          setSelectedCategory(promptsFromDb[0].title);
-        } else {
-          setSelectedCategory('');
-        }
-      } catch (error) {
-        console.error("Failed to fetch example prompts:", error);
-        setError("Could not load example prompts. Please check your connection and try again.");
-      } finally {
-        setPromptsLoading(false);
-      }
-    };
     fetchPrompts();
-  }, []);
+  }, [fetchPrompts]);
   
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -813,8 +815,8 @@ const App: React.FC = () => {
 
   const handleAddPrompt = async (prompt: { text: string; imageFile: File | null }, categoryTitle: string) => {
     try {
-        const updatedPrompts = await adminService.addPrompt(prompt, categoryTitle);
-        setExamplePrompts(updatedPrompts);
+        await adminService.addPrompt(prompt, categoryTitle);
+        fetchPrompts(); // REFRESH
     } catch (error) {
         console.error("Failed to add prompt:", error);
         setError("Could not save the new prompt.");
@@ -827,8 +829,8 @@ const App: React.FC = () => {
     originalImageUrl: string | null
   ) => {
     try {
-        const updatedPrompts = await adminService.updatePrompt(promptId, updates, originalImageUrl);
-        setExamplePrompts(updatedPrompts);
+        await adminService.updatePrompt(promptId, updates, originalImageUrl);
+        fetchPrompts(); // REFRESH
     } catch (error) {
         console.error("Failed to update prompt:", error);
         setError("Could not update the prompt.");
@@ -837,8 +839,8 @@ const App: React.FC = () => {
 
   const handleRemovePrompt = async (promptId: string) => {
     try {
-        const updatedPrompts = await adminService.deletePrompt(promptId);
-        setExamplePrompts(updatedPrompts);
+        await adminService.deletePrompt(promptId);
+        fetchPrompts(); // REFRESH
     } catch (error) {
         console.error("Failed to remove prompt:", error);
         setError("Could not remove the prompt.");
