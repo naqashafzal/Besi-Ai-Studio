@@ -84,6 +84,7 @@ interface GraphicToolButtonProps {
   isActive: boolean;
   onClick: (tool: GraphicSuiteTool) => void;
   isCollapsed: boolean;
+  isPro?: boolean;
 }
 
 const GraphicToolButton: React.FC<GraphicToolButtonProps> = ({
@@ -93,6 +94,7 @@ const GraphicToolButton: React.FC<GraphicToolButtonProps> = ({
   isActive,
   onClick,
   isCollapsed,
+  isPro,
 }) => (
   <button
     onClick={() => onClick(tool)}
@@ -104,7 +106,15 @@ const GraphicToolButton: React.FC<GraphicToolButtonProps> = ({
     title={label}
   >
     <div className={`w-6 h-6 flex-shrink-0 transition-all duration-300 ${isCollapsed ? 'mr-0' : 'mr-4'}`}>{icon}</div>
-    <span className={`font-semibold whitespace-nowrap overflow-hidden transition-all duration-300 ${isCollapsed ? 'opacity-0 max-w-0' : 'opacity-100 max-w-xs'}`}>{label}</span>
+    <span className={`font-semibold whitespace-nowrap overflow-hidden transition-all duration-300 flex items-center ${isCollapsed ? 'opacity-0 max-w-0' : 'opacity-100 max-w-xs'}`}>
+      {label}
+      {isPro && !isCollapsed && (
+          <span className="ml-2 flex items-center gap-1 px-1.5 py-0.5 bg-brand-secondary text-background font-bold rounded-full text-[10px] leading-none">
+              <StarIcon className="w-2.5 h-2.5" />
+              PRO
+          </span>
+      )}
+    </span>
   </button>
 );
 
@@ -160,8 +170,8 @@ const Sidebar: React.FC<SidebarProps> = ({ generationMode, graphicSuiteTool, onM
     onMobileClose();
   };
 
-  const graphicTools: { tool: GraphicSuiteTool, label: string, icon: React.ReactNode }[] = [
-      { tool: 'logo_maker', label: 'Logo Maker', icon: <SparklesIcon className="w-6 h-6" /> },
+  const graphicTools: { tool: GraphicSuiteTool, label: string, icon: React.ReactNode, isPro?: boolean }[] = [
+      { tool: 'logo_maker', label: 'Logo Maker', icon: <SparklesIcon className="w-6 h-6" />, isPro: true },
       { tool: 'asset_generator', label: 'Asset Generator', icon: <PhotoIcon className="w-6 h-6" /> },
       { tool: 'photo_editor', label: 'Photo Editor', icon: <PaintBrushIcon className="w-6 h-6" /> },
       { tool: 'upscale', label: 'Upscale Image', icon: <ArrowsPointingOutIcon className="w-6 h-6" /> },
@@ -250,12 +260,13 @@ const Sidebar: React.FC<SidebarProps> = ({ generationMode, graphicSuiteTool, onM
 
         <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isGraphicSuiteOpen ? 'max-h-[500px]' : 'max-h-0'}`}>
           <div className={`transition-all duration-300 ease-in-out ${!isCollapsed ? 'pl-4 border-l-2 border-border ml-4' : 'flex flex-col items-center'}`}>
-            {graphicTools.map(({ tool, label, icon }) => (
+            {graphicTools.map(({ tool, label, icon, isPro }) => (
                 <GraphicToolButton
                     key={tool}
                     icon={icon}
                     label={label}
                     tool={tool}
+                    isPro={isPro}
                     isActive={generationMode === 'graphic_suite' && graphicSuiteTool === tool}
                     onClick={handleGraphicToolClick}
                     isCollapsed={isCollapsed}

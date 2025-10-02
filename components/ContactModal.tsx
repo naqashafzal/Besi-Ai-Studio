@@ -70,8 +70,8 @@ const ContactModal: React.FC<ContactModalProps> = ({ onClose, session, profile }
                             Have a question or feedback? We'd love to hear from you.
                             <br />
                             You can also email us directly at{' '}
-                            <a href="mailto:ai@nullpk.com" className="font-medium text-brand hover:underline">
-                                ai@nullpk.com
+                            <a href="mailto:support@bestai.website" className="font-medium text-brand hover:underline">
+                                support@bestai.website
                             </a>.
                         </p>
                     </div>

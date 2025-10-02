@@ -1,3 +1,3 @@
 User-agent: *
 Allow: /
-Sitemap: https://portrait.bestai.website/sitemap.xml
+Sitemap: http://bestai.website/sitemap.xml

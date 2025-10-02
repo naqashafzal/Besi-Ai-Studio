@@ -3,11 +3,11 @@
 # BestAI Portrait Generator
 
 [![Author](https://img.shields.io/badge/Author-Naqash%20Afzal-blue.svg)](https://github.com/naqashafzal)
-[![Website](https://img.shields.io/badge/Website-ai.nullpk.com-brightgreen.svg)](https://ai.nullpk.com)
+[![Website](https://img.shields.io/badge/Website-bestai.website-brightgreen.svg)](http://bestai.website)
 
 Transform your photos into professional headshots, epic sci-fi portraits, or creative characters using the power of Google's Gemini AI. This advanced web application provides a seamless user experience for generating high-quality images and videos with a rich set of features for both users and administrators.
 
-**Live Demo:** [**ai.nullpk.com**](https://ai.nullpk.com)
+**Live Demo:** [**bestai.website**](http://bestai.website)
 
  <!-- Replace with an actual screenshot -->
 
@@ -165,5 +165,5 @@ Distributed under the MIT License. See `LICENSE` for more information.
 ## 👤 Author
 
 -   **Naqash Afzal**
-    -   Website: [ai.nullpk.com](https://ai.nullpk.com)
+    -   Website: [bestai.website](http://bestai.website)
     -   GitHub: [@naqashafzal](https://github.com/naqashafzal)

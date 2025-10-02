@@ -204,8 +204,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         {/* Right Column: Image Slider */}
                         <div className="w-full">
                             <ImageComparisonSlider
-                                beforeImage="/prompts/sci-fi-warrior.png"
-                                afterImage="/prompts/victorian-painting.png"
+                                beforeImage="https://scontent.flhe7-2.fna.fbcdn.net/v/t39.30808-6/545543848_24219463131072335_5912790439395453215_n.jpg?_nc_cat=109&ccb=1-7&_nc_sid=a5f93a&_nc_eui2=AeGb4RAgp-s6FZLVCSdndq_EtPAd5D8R2i208B3kPxHaLV-BQLKaYifbi1pOQgFkJSV1FppvW9lXaiqFWr5h8xQD&_nc_ohc=pMNX8zH-tFkQ7kNvwF95PWj&_nc_oc=AdmyD6meDkFJ22S3gu81PKDC1uCmvN15JHhBNO67M3ZM9kutla39A7VI4uH7UVRB3S8&_nc_zt=23&_nc_ht=scontent.flhe7-2.fna&_nc_gid=WbCcGdjwWIVXnou1A95YuA&oh=00_Afbx03rDq_vvTsVqRmjwbOfsW5kWCfbEFttIsr66iREI7w&oe=68E446C4"
+                                afterImage="https://scontent.flhe3-1.fna.fbcdn.net/v/t39.30808-6/550319595_24306225175729463_4562942395625021833_n.jpg?_nc_cat=111&ccb=1-7&_nc_sid=833d8c&_nc_eui2=AeHdNcUEfmYI4J8ruO9pmvMH0FiXRXfIEVDQWJdFd8gRUFTuyohDvXolAUdPdZopPK4QY88fXdzkiAs1qMDv0XqB&_nc_ohc=4wSBj9yunY8Q7kNvwFyufWM&_nc_oc=Adl_OT1FQKbMPD5KTSTc2ZZCJ7ZI5rmqCXNw22vh1LWqmwQN0qkH_bVsQ9xObNLuV1k&_nc_zt=23&_nc_ht=scontent.flhe3-1.fna&_nc_gid=gi0hH2G7uFOXns8BbSAbxw&oh=00_AfZKdxmdU5JP4RCIMieq4jAn0KYGCsgky_gBoDsQxiYrQQ&oe=68E444F3"
                             />
                         </div>
                     </div>

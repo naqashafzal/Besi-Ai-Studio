@@ -34,7 +34,7 @@ Here is key information about the app:
 - **Pro Plan:** The ultimate creative package. Costs about $5.99/month (price may vary by country) and includes 2500 monthly credits. Pro members unlock exclusive features like HD image generation, all aspect ratios, faster generation speeds, and priority access to new features.
 
 **Contact Information:**
-- For any support, questions, or feedback, users can reach out to the team via the contact form on the website or by emailing directly at ai@nullpk.com.
+- For any support, questions, or feedback, users can reach out to the team via the contact form on the website or by emailing directly at support@bestai.website.
 
 When a user asks about a feature, explain how it works. If they ask about limits or how to get more credits, explain the Free and Pro plans and gently encourage them to upgrade for the best experience. If they ask for help, provide the contact email.`
         }
@@ -626,7 +626,9 @@ export const generateGraphic = async (
     prompt: string,
     style: string,
     type: 'illustration' | 'icon' | 'logo_maker' | 'pattern',
-    count: number
+    count: number,
+    colorPalette?: string,
+    negativePrompt?: string
 ): Promise<string[]> => {
      try {
         let finalPrompt = '';
@@ -641,7 +643,14 @@ export const generateGraphic = async (
                 finalPrompt = `A seamless, repeating pattern featuring ${prompt}. Style: ${style}.`;
                 break;
             case 'logo_maker':
-                finalPrompt = `A modern, professional logo for a company. The logo should represent: ${prompt}. Style: ${style}. Do not include any text.`;
+                finalPrompt = `A modern, professional logo for a brand or company. The logo should represent: ${prompt}. Style: ${style}. The logo MUST NOT contain any text or letters.`;
+                if (colorPalette?.trim()) {
+                    finalPrompt += ` Use a primary color palette of: ${colorPalette}.`;
+                }
+                if (negativePrompt?.trim()) {
+                    finalPrompt += ` Avoid the following elements: ${negativePrompt}.`;
+                }
+                finalPrompt += ' The final logo must be on a clean, solid white background for easy usability.';
                 break;
         }
         

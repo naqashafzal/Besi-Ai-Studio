@@ -217,6 +217,9 @@ const App: React.FC = () => {
   const [graphicImage, setGraphicImage] = useState<File | null>(null);
   const [graphicImageDataUrl, setGraphicImageDataUrl] = useState<string | null>(null);
   const [replaceBackgroundPrompt, setReplaceBackgroundPrompt] = useState('');
+  const [logoStyle, setLogoStyle] = useState('Minimalist');
+  const [logoColorPalette, setLogoColorPalette] = useState('');
+  const [logoNegativePrompt, setLogoNegativePrompt] = useState('');
 
   // Architecture Suite State
   const [architectureSuiteTool, setArchitectureSuiteTool] = useState<ArchitectureSuiteTool>('exterior');
@@ -569,12 +572,22 @@ const App: React.FC = () => {
   }, []);
 
   const handleGraphicToolChange = useCallback((tool: GraphicSuiteTool) => {
+    if (tool === 'logo_maker' && (!session || profile?.plan !== 'pro')) {
+        setError('Logo Maker is a Pro feature. Please sign up or upgrade to use it.');
+        if (session) {
+            setIsMembershipModalOpen(true);
+        } else {
+            handleGoToPricing();
+        }
+        return;
+    }
+
     if (generationMode !== 'graphic_suite') {
       handleModeChange('graphic_suite');
     }
     setGraphicSuiteTool(tool);
     setAssetGeneratorTool('illustration'); // Reset sub-tool when changing main tool
-  }, [generationMode, handleModeChange]);
+  }, [generationMode, handleModeChange, session, profile]);
 
   const handleArchitectureToolChange = useCallback((tool: ArchitectureSuiteTool) => {
     if (generationMode !== 'architecture_suite') {
@@ -1213,11 +1226,12 @@ const App: React.FC = () => {
 
   const handleGenerateGraphic = async (type: 'illustration' | 'icon' | 'logo_maker' | 'pattern') => {
     if (!graphicPrompt.trim()) {
-        setError("Please enter a prompt for your graphic.");
-        return;
+      setError("Please enter a prompt for your graphic.");
+      return;
     }
     const costKey = `graphic_${type}` as keyof Omit<CreditCostSettings, 'id'>;
-    const cost = getCost(costKey) * graphicCount;
+    const count = type === 'logo_maker' ? 4 : graphicCount;
+    const cost = getCost(costKey) * count;
 
     const canProceed = await deductCredits(cost);
     if (!canProceed) return;
@@ -1227,7 +1241,10 @@ const App: React.FC = () => {
     setGeneratedImageUrls(null);
     setGeneratedSvgs(null);
     try {
-      const imageUrls = await generateGraphic(graphicPrompt, graphicStyle, type, graphicCount);
+      const imageUrls = type === 'logo_maker' 
+        ? await generateGraphic(graphicPrompt, logoStyle, 'logo_maker', 4, logoColorPalette, logoNegativePrompt)
+        : await generateGraphic(graphicPrompt, graphicStyle, type, graphicCount);
+      
       setGeneratedImageUrls(imageUrls);
       setGenerationState(GenerationState.SUCCESS);
       setHistoryImageUrls(prev => [...imageUrls, ...prev]);
@@ -2078,17 +2095,53 @@ const App: React.FC = () => {
                           )}
                           {graphicSuiteTool === 'logo_maker' && (
                             <div className="space-y-4">
-                                 <textarea
+                                <textarea
                                     value={graphicPrompt}
                                     onChange={(e) => setGraphicPrompt(e.target.value)}
-                                    placeholder="Describe your brand or company..."
+                                    placeholder="Describe your brand, e.g., 'A majestic eagle for a tech company'"
                                     className="w-full h-24 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
                                     disabled={generationState === GenerationState.LOADING}
                                 />
-                                 <button onClick={() => handleGenerateGraphic('logo_maker')} disabled={!graphicPrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                <div className="p-4 bg-background border border-border rounded-lg space-y-4">
+                                    <h4 className="text-sm font-semibold">Advanced Options</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-text-secondary mb-1">Logo Style</label>
+                                            <select value={logoStyle} onChange={e => setLogoStyle(e.target.value)} className="w-full p-2 bg-panel-light border border-border rounded-lg text-sm">
+                                                <option>Minimalist</option>
+                                                <option>Geometric</option>
+                                                <option>Abstract</option>
+                                                <option>3D</option>
+                                                <option>Vintage</option>
+                                                <option>Hand-drawn</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-text-secondary mb-1">Color Palette (optional)</label>
+                                            <input
+                                                type="text"
+                                                value={logoColorPalette}
+                                                onChange={(e) => setLogoColorPalette(e.target.value)}
+                                                placeholder="e.g., Blue, white, silver"
+                                                className="w-full p-2 bg-panel-light border border-border rounded-lg text-sm"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-text-secondary mb-1">Negative Prompt (optional)</label>
+                                        <input
+                                            type="text"
+                                            value={logoNegativePrompt}
+                                            onChange={(e) => setLogoNegativePrompt(e.target.value)}
+                                            placeholder="Things to avoid, e.g., text, complex shapes"
+                                            className="w-full p-2 bg-panel-light border border-border rounded-lg text-sm"
+                                        />
+                                    </div>
+                                </div>
+                                <button onClick={() => handleGenerateGraphic('logo_maker')} disabled={!graphicPrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
                                     <SparklesIcon className="w-5 h-5"/>
                                     Generate Logos ({getCost('graphic_logo_maker') * 4} credits)
-                                 </button>
+                                </button>
                             </div>
                           )}
                            {graphicSuiteTool === 'photo_editor' && (
