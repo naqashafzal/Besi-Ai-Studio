@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Plan, Session, UserProfile, PlanCountryPrice } from '../types';
 import PricingTable from './PricingTable';
 import Footer from './Footer';
@@ -20,7 +20,6 @@ import {
 interface LandingPageProps {
   onLaunch: () => void;
   onLoginClick: () => void;
-  onSignUpClick: () => void;
   onContactClick: () => void;
   pricingTableRef: React.RefObject<HTMLElement>;
   plans: Plan[];
@@ -29,6 +28,8 @@ interface LandingPageProps {
   onSelectPlan: (planName: string) => void;
   country?: string | null;
   planCountryPrices: PlanCountryPrice[];
+  initialScrollTarget: 'pricing' | null;
+  onScrollComplete: () => void;
 }
 
 const FeatureListItem = ({ icon, title, description }: { icon: React.ReactNode, title: string, description: string }) => (
@@ -125,7 +126,6 @@ const ImageComparisonSlider = ({ beforeImage, afterImage }: { beforeImage: strin
 const LandingPage: React.FC<LandingPageProps> = ({
   onLaunch,
   onLoginClick,
-  onSignUpClick,
   onContactClick,
   pricingTableRef,
   plans,
@@ -133,12 +133,21 @@ const LandingPage: React.FC<LandingPageProps> = ({
   profile,
   onSelectPlan,
   country,
-  planCountryPrices
+  planCountryPrices,
+  initialScrollTarget,
+  onScrollComplete,
 }) => {
     
     const scrollTo = (ref: React.RefObject<HTMLElement>) => {
         ref.current?.scrollIntoView({ behavior: 'smooth' });
     };
+
+    useEffect(() => {
+        if (initialScrollTarget === 'pricing' && pricingTableRef.current) {
+          scrollTo(pricingTableRef);
+          onScrollComplete();
+        }
+    }, [initialScrollTarget, onScrollComplete, pricingTableRef]);
 
     return (
       <div className="bg-background text-text-primary font-sans animate-fade-in">
@@ -157,7 +166,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                  <button onClick={onLoginClick} className="px-4 py-2 bg-panel-light text-text-primary font-semibold rounded-lg hover:bg-border transition-colors">
                     Login
                  </button>
-                 <button onClick={onSignUpClick} className="px-4 py-2 bg-brand text-white font-semibold rounded-lg hover:bg-brand-hover transition-colors">
+                 <button onClick={() => scrollTo(pricingTableRef)} className="px-4 py-2 bg-brand text-white font-semibold rounded-lg hover:bg-brand-hover transition-colors">
                     Sign Up
                  </button>
              </div>

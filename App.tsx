@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { GenerationState, GenerativePart, PromptCategory, Prompt, Session, UserProfile, VisitorProfile, Plan, PaymentSettings, PlanCountryPrice, ContactFormData, ChatMessage, Coupon, CreditCostSettings, DecadeGeneration, GraphicSuiteTool, ArchitectureSuiteTool } from './types';
 import { generateImage, generateMultiPersonImage, generatePromptFromImage, createChat, generateVideo, generateSceneDescriptionFromImage, restoreImage, editImage, generateGraphic, upscaleImage, removeBackground, replaceBackground, colorizeGraphic, generateArchitectureImage } from './services/geminiService';
@@ -102,6 +103,7 @@ const App: React.FC = () => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [visitorProfile, setVisitorProfile] = useState<VisitorProfile | null>(null);
   const [authModalView, setAuthModalView] = useState<'sign_in' | 'sign_up' | null>(null);
+  const [selectedPlanForSignup, setSelectedPlanForSignup] = useState<string | null>(null);
   const [isMembershipModalOpen, setIsMembershipModalOpen] = useState(false);
   const [isMembershipPromoOpen, setIsMembershipPromoOpen] = useState(false);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -225,6 +227,12 @@ const App: React.FC = () => {
   // UI State
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [initialScrollTarget, setInitialScrollTarget] = useState<'pricing' | null>(null);
+
+  const handleGoToPricing = () => {
+    setInitialScrollTarget('pricing');
+    setAppLaunched(false);
+  };
 
 
   // --- Credit Costs ---
@@ -335,7 +343,7 @@ const App: React.FC = () => {
     const current = session ? profile?.credits : visitorProfile?.credits;
     if ((current ?? 0) < amount) {
         setError("You don't have enough credits.");
-        if (!session) setAuthModalView('sign_up');
+        if (!session) handleGoToPricing();
         return false;
     }
 
@@ -542,6 +550,14 @@ const App: React.FC = () => {
       setProfile(null); // Clear profile on logout
     }
   }, [session, plans]);
+
+  // Effect to trigger upgrade modal after signup if Pro was selected
+  useEffect(() => {
+    if (profile && profile.plan === 'free' && selectedPlanForSignup === 'pro') {
+        setIsMembershipModalOpen(true);
+        setSelectedPlanForSignup(null);
+    }
+  }, [profile, selectedPlanForSignup]);
   
   const handleModeChange = useCallback((mode: 'single' | 'multi' | 'video' | 'past_forward' | 'restore' | 'graphic_suite' | 'architecture_suite') => {
     setGenerationMode(mode);
@@ -776,7 +792,7 @@ const App: React.FC = () => {
        if (generationMode === 'graphic_suite' && graphicSuiteTool === 'photo_editor') {
           if (!session) {
             setError("Image editing is for logged-in users only.");
-            setAuthModalView('sign_up');
+            handleGoToPricing();
             return;
           }
           setEditorHistory([]); // Reset history for new image
@@ -854,7 +870,7 @@ const App: React.FC = () => {
         if (session) {
             setIsMembershipModalOpen(true);
         } else {
-            setAuthModalView('sign_up');
+            handleGoToPricing();
         }
         return;
     }
@@ -903,7 +919,7 @@ const App: React.FC = () => {
         const cost = getCost('standard_image');
         if ((visitorProfile?.credits ?? 0) < cost) {
             setError("You're out of credits. Sign up for more!");
-            setAuthModalView('sign_up');
+            handleGoToPricing();
             return;
         }
         if (!queue.includes(visitorId)) {
@@ -920,7 +936,7 @@ const App: React.FC = () => {
     }
     if (!session) {
         setError("This feature is for logged-in users only.");
-        setAuthModalView('sign_up');
+        handleGoToPricing();
         return;
     }
 
@@ -946,7 +962,7 @@ const App: React.FC = () => {
   const handleGenerateMultiPersonImage = useCallback(async () => {
     if (!session) {
         setError("Multi-person generation is available for logged-in users only.");
-        setAuthModalView('sign_up');
+        handleGoToPricing();
         return;
     }
 
@@ -1035,7 +1051,7 @@ const App: React.FC = () => {
     }
     if (!session) {
         setError("Video generation is available for logged-in users only.");
-        setAuthModalView('sign_up');
+        handleGoToPricing();
         return;
     }
     
@@ -1084,7 +1100,7 @@ const App: React.FC = () => {
     // Restore is a premium feature for logged-in users
     if (!session) {
         setError("Image restoration is available for logged-in users only.");
-        setAuthModalView('sign_up');
+        handleGoToPricing();
         return;
     }
 
@@ -1117,7 +1133,7 @@ const App: React.FC = () => {
 ) => {
     if (!session) {
         setError("Image editing is available for logged-in users only.");
-        setAuthModalView('sign_up');
+        handleGoToPricing();
         return;
     }
 
@@ -1267,7 +1283,7 @@ const App: React.FC = () => {
     }
      if (!session) {
         setError("Architecture suite is for logged-in users only.");
-        setAuthModalView('sign_up');
+        handleGoToPricing();
         return;
     }
 
@@ -1582,32 +1598,6 @@ const App: React.FC = () => {
   };
   
   const proPlan = plans.find(p => p.name === 'pro');
-  
-  if (!appLaunched) {
-      return (
-          <LandingPage
-            onLaunch={handleLaunchApp}
-            onLoginClick={() => setAuthModalView('sign_in')}
-            onSignUpClick={() => setAuthModalView('sign_up')}
-            onContactClick={() => setIsContactModalOpen(true)}
-            pricingTableRef={pricingTableRef}
-            plans={plans}
-            session={session}
-            profile={profile}
-            onSelectPlan={(planName) => {
-                if (planName === 'pro') {
-                    if (session) setIsMembershipModalOpen(true);
-                    else setAuthModalView('sign_up');
-                } else {
-                     setAuthModalView('sign_up');
-                }
-            }}
-            country={profile?.country}
-            planCountryPrices={planCountryPrices}
-          />
-      );
-  }
-  
   const promptFocusLabels: Record<keyof typeof promptFocus, string> = {
     pose: 'Pose & Action',
     style: 'Style & Mood',
@@ -1619,557 +1609,587 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background text-text-primary">
-      {isMobileSidebarOpen && <div onClick={() => setIsMobileSidebarOpen(false)} className="fixed inset-0 bg-black/60 z-40 lg:hidden"></div>}
-      <div className="flex min-h-screen">
-          <Sidebar
-              generationMode={generationMode}
-              graphicSuiteTool={graphicSuiteTool}
-              onModeChange={handleModeChange}
-              onGraphicToolChange={handleGraphicToolChange}
-              architectureSuiteTool={architectureSuiteTool}
-              onArchitectureToolChange={handleArchitectureToolChange}
-              profile={profile}
-              isCollapsed={isSidebarCollapsed}
-              onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-              isMobileOpen={isMobileSidebarOpen}
-              onMobileClose={() => setIsMobileSidebarOpen(false)}
-              onGoHome={handleGoHome}
+    <>
+      {!appLaunched ? (
+          <LandingPage
+            onLaunch={handleLaunchApp}
+            onLoginClick={() => setAuthModalView('sign_in')}
+            onContactClick={() => setIsContactModalOpen(true)}
+            pricingTableRef={pricingTableRef}
+            plans={plans}
+            session={session}
+            profile={profile}
+            onSelectPlan={(planName) => {
+                if (session) {
+                    if (planName === 'pro') {
+                        setIsMembershipModalOpen(true);
+                    }
+                } else {
+                    setSelectedPlanForSignup(planName);
+                    setAuthModalView('sign_up');
+                }
+            }}
+            country={profile?.country}
+            planCountryPrices={planCountryPrices}
+            initialScrollTarget={initialScrollTarget}
+            onScrollComplete={() => setInitialScrollTarget(null)}
           />
+      ) : (
+        <div className="min-h-screen bg-background text-text-primary">
+          {isMobileSidebarOpen && <div onClick={() => setIsMobileSidebarOpen(false)} className="fixed inset-0 bg-black/60 z-40 lg:hidden"></div>}
+          <div className="flex min-h-screen">
+              <Sidebar
+                  generationMode={generationMode}
+                  graphicSuiteTool={graphicSuiteTool}
+                  onModeChange={handleModeChange}
+                  onGraphicToolChange={handleGraphicToolChange}
+                  architectureSuiteTool={architectureSuiteTool}
+                  onArchitectureToolChange={handleArchitectureToolChange}
+                  profile={profile}
+                  isCollapsed={isSidebarCollapsed}
+                  onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                  isMobileOpen={isMobileSidebarOpen}
+                  onMobileClose={() => setIsMobileSidebarOpen(false)}
+                  onGoHome={handleGoHome}
+              />
 
-        <div className={`flex-grow transition-all duration-300 ${isSidebarCollapsed ? 'lg:ml-24' : 'lg:ml-64'}`}>
-          <main className="p-4 sm:p-6 lg:p-8">
-            <Header
-              session={session}
-              profile={profile}
-              visitorProfile={visitorProfile}
-              proPlan={proPlan}
-              onSignUpClick={() => setAuthModalView('sign_up')}
-              onLoginClick={() => setAuthModalView('sign_in')}
-              onUpgradeClick={() => setIsMembershipModalOpen(true)}
-              onAdminPanelClick={() => setIsAdminPanelOpen(true)}
-              onToggleMobileSidebar={() => setIsMobileSidebarOpen(true)}
-            />
-            
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-              {/* Left Column: Controls */}
-              <div className="bg-panel p-6 rounded-2xl border border-border space-y-6">
-                 {/* Generation Mode specific controls */}
-                 {generationMode === 'single' && (
-                    <div className="space-y-8">
-                        {/* Step 1 */}
-                        <div>
-                            <div className="flex items-center gap-4">
-                                <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">1</div>
-                                <h3 className="text-lg font-bold text-text-primary">Upload Base Photo</h3>
-                            </div>
-                            <div className="pl-12 mt-4">
-                                <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={generationState === GenerationState.LOADING} />
-                            </div>
-                        </div>
-
-                        {/* Step 2 */}
-                        <div>
-                            <div className="flex items-center gap-4">
-                                <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">2</div>
-                                <div>
-                                    <h3 className="text-lg font-bold text-text-primary">Get Prompt from Image <span className="text-sm font-normal text-text-secondary">(Optional)</span></h3>
-                                    <p className="text-sm text-text-secondary">Let AI describe an image to generate a new prompt.</p>
+            <div className={`flex-grow transition-all duration-300 ${isSidebarCollapsed ? 'lg:ml-24' : 'lg:ml-64'}`}>
+              <main className="p-4 sm:p-6 lg:p-8">
+                <Header
+                  session={session}
+                  profile={profile}
+                  visitorProfile={visitorProfile}
+                  proPlan={proPlan}
+                  onSignUpClick={handleGoToPricing}
+                  onLoginClick={() => setAuthModalView('sign_in')}
+                  onUpgradeClick={() => setIsMembershipModalOpen(true)}
+                  onAdminPanelClick={() => setIsAdminPanelOpen(true)}
+                  onToggleMobileSidebar={() => setIsMobileSidebarOpen(true)}
+                  onGoHome={handleGoHome}
+                />
+                
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+                  {/* Left Column: Controls */}
+                  <div className="bg-panel p-6 rounded-2xl border border-border space-y-6">
+                    {/* Generation Mode specific controls */}
+                    {generationMode === 'single' && (
+                        <div className="space-y-8">
+                            {/* Step 1 */}
+                            <div>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">1</div>
+                                    <h3 className="text-lg font-bold text-text-primary">Upload Base Photo</h3>
+                                </div>
+                                <div className="pl-12 mt-4">
+                                    <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={generationState === GenerationState.LOADING} />
                                 </div>
                             </div>
-                            <div className="pl-12 mt-4 space-y-4">
-                                <ImageUploader onImageChange={handlePromptGenImageChange} imageDataUrl={promptGenImageDataUrl} disabled={isGeneratingPrompt}/>
-                                <div className="p-4 bg-background border border-border rounded-lg space-y-3">
-                                    <h4 className="text-sm font-semibold">Describe these elements:</h4>
-                                    <div className="flex items-center">
-                                        <input id="focus-all" type="checkbox" ref={selectAllPromptFocusRef} onChange={handleSelectAllPromptFocus} className="h-4 w-4 rounded border-border bg-panel-light text-brand focus:ring-brand" />
-                                        <label htmlFor="focus-all" className="ml-2 text-sm font-medium">Select All</label>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                                        {Object.entries(promptFocusLabels).map(([key, label]) => (
-                                            <div key={key} className="flex items-center">
-                                                <input 
-                                                    id={`focus-${key}`}
-                                                    type="checkbox"
-                                                    checked={promptFocus[key as keyof typeof promptFocus]}
-                                                    onChange={e => setPromptFocus(p => ({...p, [key]: e.target.checked}))}
-                                                    className="h-4 w-4 rounded border-border bg-panel-light text-brand focus:ring-brand"
-                                                />
-                                                <label htmlFor={`focus-${key}`} className="ml-2">{label}</label>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                                <input
-                                    type="text"
-                                    value={promptKeywords}
-                                    onChange={(e) => setPromptKeywords(e.target.value)}
-                                    placeholder="Incorporate Keywords (optional): e.g., cinematic"
-                                    className="w-full p-3 bg-background border border-border rounded-lg"
-                                    disabled={isGeneratingPrompt}
-                                />
-                                <button onClick={handleGeneratePromptFromImage} disabled={!promptGenImage || isGeneratingPrompt} className="w-full flex items-center justify-center gap-2 p-3 bg-panel-light text-text-primary font-semibold rounded-lg hover:bg-border disabled:opacity-50">
-                                    <PaintBrushIcon className="w-5 h-5"/>
-                                    {isGeneratingPrompt ? 'Generating...' : `Generate Prompt (${getCost('prompt_from_image')} Credits)`}
-                                </button>
-                            </div>
-                        </div>
 
-                        {/* Step 3 */}
-                        <div>
-                            <div className="flex items-center gap-4">
-                                <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">3</div>
-                                <h3 className="text-lg font-bold text-text-primary">Describe the Transformation</h3>
-                            </div>
-                            <div className="pl-12 mt-4 space-y-6">
-                                <textarea
-                                    value={prompt}
-                                    onChange={(e) => setPrompt(e.target.value)}
-                                    placeholder="e.g., A professional corporate headshot, wearing a dark suit..."
-                                    className="w-full h-28 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
-                                    disabled={generationState === GenerationState.LOADING}
-                                />
-                                 {/* Example Prompts */}
-                                <div className="space-y-4">
-                                    <p className="text-sm font-medium text-text-secondary">Or try an example:</p>
-                                    {promptsLoading ? (
-                                        <p className="text-text-secondary text-sm">Loading prompts...</p>
-                                    ) : (
-                                        <>
-                                            <input
-                                                type="text"
-                                                placeholder="Search examples..."
-                                                value={promptSearch}
-                                                onChange={e => setPromptSearch(e.target.value)}
-                                                className="w-full p-2 bg-background border border-border rounded-lg text-sm"
-                                            />
-                                            <div className="flex gap-2 overflow-x-auto pb-2">
-                                                {examplePrompts.map(category => (
-                                                    <button
-                                                        key={category.id}
-                                                        onClick={() => setSelectedCategory(category.title)}
-                                                        className={`px-3 py-1.5 text-xs font-semibold rounded-full whitespace-nowrap transition-colors ${selectedCategory === category.title ? 'bg-brand text-white' : 'bg-panel-light hover:bg-border'}`}
-                                                    >
-                                                        {category.title}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                            <ul className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                                                {examplePrompts.find(c => c.title === selectedCategory)?.prompts.filter(p => p.text.toLowerCase().includes(promptSearch.toLowerCase())).slice(0, 3).map(p => (
-                                                    <li key={p.id} onClick={() => setPrompt(p.text)} className="relative aspect-[3/4] rounded-lg overflow-hidden group cursor-pointer border border-border">
-                                                        {p.imageUrl && <img src={p.imageUrl} alt={p.text} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />}
-                                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent"></div>
-                                                        <p className="absolute bottom-2 left-2 right-2 text-xs text-white font-medium leading-tight line-clamp-2">{p.text}</p>
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        </>
-                                    )}
-                                </div>
-                                {/* Generation Settings */}
-                                <div className="p-4 bg-background border border-border rounded-lg space-y-4">
-                                    <h4 className="text-sm font-semibold">Generation Settings</h4>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-sm font-medium text-text-secondary mb-2">Generation Mode</label>
-                                            <div className="grid grid-cols-2 gap-1 bg-panel-light p-1 rounded-lg border border-border">
-                                                <button type="button" onClick={() => setGenerationFidelity('creative')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${generationFidelity === 'creative' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>Creative</button>
-                                                <button type="button" onClick={() => setGenerationFidelity('fidelity')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${generationFidelity === 'fidelity' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>Fidelity</button>
-                                            </div>
-                                        </div>
-                                        {profile?.plan === 'pro' && (
-                                        <div>
-                                            <label className="block text-sm font-medium text-text-secondary mb-2">Image Size</label>
-                                            <div className="grid grid-cols-2 gap-1 bg-panel-light p-1 rounded-lg border border-border">
-                                                <button type="button" onClick={() => setImageSize('1024')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${imageSize === '1024' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>Standard <span className="text-xs text-text-tertiary">(1024px)</span></button>
-                                                <button type="button" onClick={() => setImageSize('2048')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${imageSize === '2048' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>HD <span className="text-xs text-text-tertiary">(2048px)</span></button>
-                                            </div>
-                                        </div>
-                                        )}
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                                        <input type="checkbox" checked={useCannyEdges} onChange={e => setUseCannyEdges(e.target.checked)} className="w-4 h-4 rounded text-brand focus:ring-brand bg-panel-light border-border"/>
-                                        <span>Use Canny Edges (Strictest Pose)</span>
-                                        </label>
-                                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                                        <input type="checkbox" checked={useStrictSizing} onChange={e => setUseStrictSizing(e.target.checked)} className="w-4 h-4 rounded text-brand focus:ring-brand bg-panel-light border-border"/>
-                                        <span>Strict sizing</span>
-                                        </label>
-                                    </div>
-                                    {profile?.plan === 'pro' && (
-                                        <div>
-                                            <label className="block text-sm font-medium text-text-secondary mb-2">Aspect Ratio</label>
-                                            <div className="grid grid-cols-5 gap-1 bg-panel-light p-1 rounded-lg border border-border">
-                                                {(['1:1', '16:9', '9:16', '4:3', '3:4'] as const).map(ar => (
-                                                    <button key={ar} type="button" onClick={() => setAspectRatio(ar)} className={`py-1.5 text-sm font-semibold rounded-md transition-colors ${aspectRatio === ar ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>{ar}</button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-
-                         {/* Final Button */}
-                        <div className="pt-4 border-t border-border">
-                             <button onClick={handleGenerateImage} disabled={!prompt.trim() || !uploadedImage || generationState === GenerationState.LOADING || generationState === GenerationState.QUEUED} className="w-full flex items-center justify-center gap-2 p-4 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50 text-lg">
-                                <SparklesIcon className="w-6 h-6"/>
-                                {generationState === GenerationState.QUEUED ? `In Queue (${queue.indexOf(visitorId) + 1}/${queue.length})` : `Generate Image (${getCost(imageSize === '2048' ? 'hd_image' : 'standard_image')} Credits)`}
-                            </button>
-                        </div>
-                    </div>
-                 )}
-
-                 {generationMode === 'multi' && (
-                    <div className="space-y-8">
-                        {/* Step 1: Upload Photos */}
-                        <div>
-                            <div className="flex items-center gap-4">
-                                <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">1</div>
-                                <h3 className="text-lg font-bold text-text-primary">Upload Photos</h3>
-                            </div>
-                            <div className="pl-12 mt-4">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {/* Step 2 */}
+                            <div>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">2</div>
                                     <div>
-                                        <h4 className="text-sm font-semibold mb-2 text-center text-text-secondary">First Person</h4>
-                                        <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={generationState === GenerationState.LOADING} />
-                                    </div>
-                                    <div>
-                                        <h4 className="text-sm font-semibold mb-2 text-center text-text-secondary">Second Person</h4>
-                                        <ImageUploader onImageChange={handleImageTwoChange} imageDataUrl={imageDataUrlTwo} disabled={generationState === GenerationState.LOADING} />
+                                        <h3 className="text-lg font-bold text-text-primary">Get Prompt from Image <span className="text-sm font-normal text-text-secondary">(Optional)</span></h3>
+                                        <p className="text-sm text-text-secondary">Let AI describe an image to generate a new prompt.</p>
                                     </div>
                                 </div>
+                                <div className="pl-12 mt-4 space-y-4">
+                                    <ImageUploader onImageChange={handlePromptGenImageChange} imageDataUrl={promptGenImageDataUrl} disabled={isGeneratingPrompt}/>
+                                    <div className="p-4 bg-background border border-border rounded-lg space-y-3">
+                                        <h4 className="text-sm font-semibold">Describe these elements:</h4>
+                                        <div className="flex items-center">
+                                            <input id="focus-all" type="checkbox" ref={selectAllPromptFocusRef} onChange={handleSelectAllPromptFocus} className="h-4 w-4 rounded border-border bg-panel-light text-brand focus:ring-brand" />
+                                            <label htmlFor="focus-all" className="ml-2 text-sm font-medium">Select All</label>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                                            {Object.entries(promptFocusLabels).map(([key, label]) => (
+                                                <div key={key} className="flex items-center">
+                                                    <input 
+                                                        id={`focus-${key}`}
+                                                        type="checkbox"
+                                                        checked={promptFocus[key as keyof typeof promptFocus]}
+                                                        onChange={e => setPromptFocus(p => ({...p, [key]: e.target.checked}))}
+                                                        className="h-4 w-4 rounded border-border bg-panel-light text-brand focus:ring-brand"
+                                                    />
+                                                    <label htmlFor={`focus-${key}`} className="ml-2">{label}</label>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <input
+                                        type="text"
+                                        value={promptKeywords}
+                                        onChange={(e) => setPromptKeywords(e.target.value)}
+                                        placeholder="Incorporate Keywords (optional): e.g., cinematic"
+                                        className="w-full p-3 bg-background border border-border rounded-lg"
+                                        disabled={isGeneratingPrompt}
+                                    />
+                                    <button onClick={handleGeneratePromptFromImage} disabled={!promptGenImage || isGeneratingPrompt} className="w-full flex items-center justify-center gap-2 p-3 bg-panel-light text-text-primary font-semibold rounded-lg hover:bg-border disabled:opacity-50">
+                                        <PaintBrushIcon className="w-5 h-5"/>
+                                        {isGeneratingPrompt ? 'Generating...' : `Generate Prompt (${getCost('prompt_from_image')} Credits)`}
+                                    </button>
+                                </div>
                             </div>
-                        </div>
 
-                        {/* Step 2: Upload Style Reference */}
-                        <div>
-                            <div className="flex items-center gap-4">
-                                <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">2</div>
-                                <div>
-                                    <h3 className="text-lg font-bold text-text-primary">Upload Style Reference <span className="text-sm font-normal text-text-secondary">(optional)</span></h3>
-                                    <p className="text-sm text-text-secondary">Upload a third image to guide the mood, composition, and background. The people in this image will be ignored.</p>
+                            {/* Step 3 */}
+                            <div>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">3</div>
+                                    <h3 className="text-lg font-bold text-text-primary">Describe the Transformation</h3>
                                 </div>
-                            </div>
-                            <div className="pl-12 mt-4 space-y-4">
-                                <ImageUploader onImageChange={handleStyleReferenceImageChange} imageDataUrl={styleReferenceImageDataUrl} disabled={generationState === GenerationState.LOADING || isGeneratingScene} />
-                                <button onClick={handleGenerateSceneFromStyle} disabled={!styleReferenceImage || isGeneratingScene} className="w-full flex items-center justify-center gap-2 p-3 bg-panel-light text-text-primary font-semibold rounded-lg hover:bg-border disabled:opacity-50">
-                                    <WandIcon className="w-5 h-5"/>
-                                    {isGeneratingScene ? 'Generating...' : `Generate Scene from Style (${getCost('prompt_from_image')} Credits)`}
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Step 3: Build Your Scene */}
-                        <div>
-                            <div className="flex items-center gap-4">
-                                <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">3</div>
-                                <h3 className="text-lg font-bold text-text-primary">Build Your Scene</h3>
-                            </div>
-                            <div className="pl-12 mt-4 space-y-6">
-                                {/* Placement */}
-                                <div>
-                                    <h4 className="text-sm font-medium text-text-secondary mb-2">Placement</h4>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <SceneBuilderButton label="Side-by-side" value="side-by-side" currentValue={multiPersonPlacement} onClick={setMultiPersonPlacement} />
-                                        <SceneBuilderButton label="Person 1 on Left" value="p1-left" currentValue={multiPersonPlacement} onClick={setMultiPersonPlacement} />
-                                        <SceneBuilderButton label="Person 2 on Left" value="p2-left" currentValue={multiPersonPlacement} onClick={setMultiPersonPlacement} />
-                                        <SceneBuilderButton label="One in Front" value="one-in-front" currentValue={multiPersonPlacement} onClick={setMultiPersonPlacement} />
-                                    </div>
-                                </div>
-                                {/* Interaction */}
-                                <div>
-                                    <h4 className="text-sm font-medium text-text-secondary mb-2">Interaction</h4>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <SceneBuilderButton label="Neutral Expression" value="neutral" currentValue={multiPersonInteraction} onClick={setMultiPersonInteraction} />
-                                        <SceneBuilderButton label="Smiling Together" value="smiling" currentValue={multiPersonInteraction} onClick={setMultiPersonInteraction} />
-                                        <SceneBuilderButton label="Looking at Each Other" value="looking-at-each-other" currentValue={multiPersonInteraction} onClick={setMultiPersonInteraction} />
-                                        <SceneBuilderButton label="Hugging" value="hugging" currentValue={multiPersonInteraction} onClick={setMultiPersonInteraction} />
-                                    </div>
-                                </div>
-                                {/* Scene Description */}
-                                <div>
-                                    <h4 className="text-sm font-medium text-text-secondary mb-2">Scene Description</h4>
+                                <div className="pl-12 mt-4 space-y-6">
                                     <textarea
-                                        value={sceneDescription}
-                                        onChange={(e) => setSceneDescription(e.target.value)}
-                                        placeholder="Describe the entire scene: the background, what they are wearing, the lighting, the overall style. e.g., 'At a beach during sunset, wearing casual summer clothes. The lighting is warm and golden. Style should be a candid, happy photograph.'"
+                                        value={prompt}
+                                        onChange={(e) => setPrompt(e.target.value)}
+                                        placeholder="e.g., A professional corporate headshot, wearing a dark suit..."
                                         className="w-full h-28 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
                                         disabled={generationState === GenerationState.LOADING}
                                     />
-                                </div>
-                                
-                                <div className="p-4 bg-background border border-border rounded-lg space-y-4">
-                                    <h4 className="text-sm font-semibold">Generation Settings</h4>
-                                    {profile?.plan === 'pro' && (
-                                        <div>
-                                            <label className="block text-sm font-medium text-text-secondary mb-2">Image Size</label>
-                                            <div className="grid grid-cols-2 gap-1 bg-panel-light p-1 rounded-lg border border-border">
-                                                <button type="button" onClick={() => setImageSize('1024')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${imageSize === '1024' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>Standard <span className="text-xs text-text-tertiary">(1024px)</span></button>
-                                                <button type="button" onClick={() => setImageSize('2048')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${imageSize === '2048' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>HD <span className="text-xs text-text-tertiary">(2048px)</span></button>
+                                     {/* Example Prompts */}
+                                    <div className="space-y-4">
+                                        <p className="text-sm font-medium text-text-secondary">Or try an example:</p>
+                                        {promptsLoading ? (
+                                            <p className="text-text-secondary text-sm">Loading prompts...</p>
+                                        ) : (
+                                            <>
+                                                <input
+                                                    type="text"
+                                                    placeholder="Search examples..."
+                                                    value={promptSearch}
+                                                    onChange={e => setPromptSearch(e.target.value)}
+                                                    className="w-full p-2 bg-background border border-border rounded-lg text-sm"
+                                                />
+                                                <div className="flex gap-2 overflow-x-auto pb-2">
+                                                    {examplePrompts.map(category => (
+                                                        <button
+                                                            key={category.id}
+                                                            onClick={() => setSelectedCategory(category.title)}
+                                                            className={`px-3 py-1.5 text-xs font-semibold rounded-full whitespace-nowrap transition-colors ${selectedCategory === category.title ? 'bg-brand text-white' : 'bg-panel-light hover:bg-border'}`}
+                                                        >
+                                                            {category.title}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                                <ul className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                                    {examplePrompts.find(c => c.title === selectedCategory)?.prompts.filter(p => p.text.toLowerCase().includes(promptSearch.toLowerCase())).slice(0, 3).map(p => (
+                                                        <li key={p.id} onClick={() => setPrompt(p.text)} className="relative aspect-[3/4] rounded-lg overflow-hidden group cursor-pointer border border-border">
+                                                            {p.imageUrl && <img src={p.imageUrl} alt={p.text} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />}
+                                                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent"></div>
+                                                            <p className="absolute bottom-2 left-2 right-2 text-xs text-white font-medium leading-tight line-clamp-2">{p.text}</p>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </>
+                                        )}
+                                    </div>
+                                    {/* Generation Settings */}
+                                    <div className="p-4 bg-background border border-border rounded-lg space-y-4">
+                                        <h4 className="text-sm font-semibold">Generation Settings</h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-text-secondary mb-2">Generation Mode</label>
+                                                <div className="grid grid-cols-2 gap-1 bg-panel-light p-1 rounded-lg border border-border">
+                                                    <button type="button" onClick={() => setGenerationFidelity('creative')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${generationFidelity === 'creative' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>Creative</button>
+                                                    <button type="button" onClick={() => setGenerationFidelity('fidelity')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${generationFidelity === 'fidelity' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>Fidelity</button>
+                                                </div>
                                             </div>
-                                        </div>
-                                    )}
-                                    <label className="flex items-center gap-2 text-sm cursor-pointer">
-                                        <input type="checkbox" checked={useStrictSizing} onChange={e => setUseStrictSizing(e.target.checked)} className="w-4 h-4 rounded text-brand focus:ring-brand bg-panel-light border-border"/>
-                                        <span>Strict sizing</span>
-                                    </label>
-                                    {profile?.plan === 'pro' && (
-                                        <div>
-                                            <label className="block text-sm font-medium text-text-secondary mb-2">Aspect Ratio</label>
-                                            <div className="grid grid-cols-5 gap-1 bg-panel-light p-1 rounded-lg border border-border">
-                                                {(['1:1', '16:9', '9:16', '4:3', '3:4'] as const).map(ar => (
-                                                    <button key={ar} type="button" onClick={() => setAspectRatio(ar)} className={`py-1.5 text-sm font-semibold rounded-md transition-colors ${aspectRatio === ar ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>{ar}</button>
-                                                ))}
+                                            {profile?.plan === 'pro' && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-text-secondary mb-2">Image Size</label>
+                                                <div className="grid grid-cols-2 gap-1 bg-panel-light p-1 rounded-lg border border-border">
+                                                    <button type="button" onClick={() => setImageSize('1024')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${imageSize === '1024' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>Standard <span className="text-xs text-text-tertiary">(1024px)</span></button>
+                                                    <button type="button" onClick={() => setImageSize('2048')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${imageSize === '2048' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>HD <span className="text-xs text-text-tertiary">(2048px)</span></button>
+                                                </div>
                                             </div>
+                                            )}
                                         </div>
-                                    )}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                            <input type="checkbox" checked={useCannyEdges} onChange={e => setUseCannyEdges(e.target.checked)} className="w-4 h-4 rounded text-brand focus:ring-brand bg-panel-light border-border"/>
+                                            <span>Use Canny Edges (Strictest Pose)</span>
+                                            </label>
+                                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                            <input type="checkbox" checked={useStrictSizing} onChange={e => setUseStrictSizing(e.target.checked)} className="w-4 h-4 rounded text-brand focus:ring-brand bg-panel-light border-border"/>
+                                            <span>Strict sizing</span>
+                                            </label>
+                                        </div>
+                                        {profile?.plan === 'pro' && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-text-secondary mb-2">Aspect Ratio</label>
+                                                <div className="grid grid-cols-5 gap-1 bg-panel-light p-1 rounded-lg border border-border">
+                                                    {(['1:1', '16:9', '9:16', '4:3', '3:4'] as const).map(ar => (
+                                                        <button key={ar} type="button" onClick={() => setAspectRatio(ar)} className={`py-1.5 text-sm font-semibold rounded-md transition-colors ${aspectRatio === ar ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>{ar}</button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        {/* Final Button */}
-                        <div className="pt-4 border-t border-border">
-                            <button onClick={handleGenerateMultiPersonImage} disabled={!sceneDescription.trim() || !uploadedImage || !uploadedImageTwo || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-4 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50 text-lg">
-                                <SparklesIcon className="w-6 h-6"/>
-                                Generate Image ({getCost(imageSize === '2048' ? 'hd_image' : 'standard_image')} Credits)
-                            </button>
-                        </div>
-                    </div>
-                 )}
-
-                 {generationMode === 'video' && (
-                     <div className="space-y-4">
-                        <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={generationState === GenerationState.GENERATING_VIDEO} />
-                        <textarea
-                            value={prompt}
-                            onChange={(e) => setPrompt(e.target.value)}
-                            placeholder="Describe the video you want to create..."
-                            className="w-full h-28 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
-                            disabled={generationState === GenerationState.GENERATING_VIDEO}
-                        />
-                         <div className="grid grid-cols-2 gap-4">
-                            <select value={videoAspectRatio} onChange={(e) => setVideoAspectRatio(e.target.value as any)} className="w-full p-2 bg-background border border-border rounded-lg text-sm">
-                                <option value="16:9">16:9</option>
-                                <option value="9:16">9:16</option>
-                                <option value="1:1">1:1</option>
-                            </select>
-                             <div>
-                                <label className="text-xs text-text-secondary">Motion Level: {videoMotionLevel}</label>
-                                <input type="range" min="1" max="10" value={videoMotionLevel} onChange={e => setVideoMotionLevel(Number(e.target.value))} className="w-full accent-brand" />
+                             {/* Final Button */}
+                            <div className="pt-4 border-t border-border">
+                                 <button onClick={handleGenerateImage} disabled={!prompt.trim() || !uploadedImage || generationState === GenerationState.LOADING || generationState === GenerationState.QUEUED} className="w-full flex items-center justify-center gap-2 p-4 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50 text-lg">
+                                    <SparklesIcon className="w-6 h-6"/>
+                                    {generationState === GenerationState.QUEUED ? `In Queue (${queue.indexOf(visitorId) + 1}/${queue.length})` : `Generate Image (${getCost(imageSize === '2048' ? 'hd_image' : 'standard_image')} Credits)`}
+                                </button>
                             </div>
                         </div>
-                        <div>
-                            <label className="text-xs text-text-secondary">Seed (0 for random)</label>
-                            <input type="number" value={videoSeed} onChange={e => setVideoSeed(Number(e.target.value))} className="w-full p-2 bg-background border border-border rounded-lg text-sm" />
-                        </div>
-                       <button onClick={handleGenerateVideo} disabled={!prompt.trim() || generationState === GenerationState.GENERATING_VIDEO} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
-                        <VideoCameraIcon className="w-5 h-5"/>
-                        Generate Video ({getCost('video_generation')} credits)
-                       </button>
-                    </div>
-                 )}
-                 
-                 {generationMode === 'restore' && (
-                     <div className="space-y-4">
-                        <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={generationState === GenerationState.LOADING} />
-                         <div className="space-y-4 p-4 bg-background rounded-lg border border-border">
-                            <RestoreOption id="enhanceFaces" label="Enhance Faces" description="Improve clarity and detail in faces." checked={restoreOptions.enhanceFaces} onChange={e => setRestoreOptions(p => ({...p, enhanceFaces: e.target.checked}))} disabled={generationState === GenerationState.LOADING} />
-                            <RestoreOption id="removeScratches" label="Remove Scratches" description="Fix dust, scratches, and blemishes." checked={restoreOptions.removeScratches} onChange={e => setRestoreOptions(p => ({...p, removeScratches: e.target.checked}))} disabled={generationState === GenerationState.LOADING} />
-                            <RestoreOption id="colorize" label="Colorize" description="Add realistic colors to B&W photos." checked={restoreOptions.colorize} onChange={e => setRestoreOptions(p => ({...p, colorize: e.target.checked}))} disabled={generationState === GenerationState.LOADING} />
-                             <RestoreOption id="upscale" label="Upscale to 4K" description="Increase image resolution and quality." checked={restoreOptions.upscale} onChange={e => setRestoreOptions(p => ({...p, upscale: e.target.checked}))} disabled={generationState === GenerationState.LOADING} isProFeature />
-                         </div>
-                       <button onClick={handleRestoreImage} disabled={!uploadedImage || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
-                        <WandIcon className="w-5 h-5"/>
-                        Restore Image ({getCost('image_restore')} credits)
-                       </button>
-                    </div>
-                 )}
+                    )}
 
-                 {generationMode === 'past_forward' && (
-                     <div className="space-y-4">
-                        <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={isGeneratingDecades} />
-                         <div className="space-y-2">
-                             <label className="text-sm font-semibold text-text-secondary">Select Decades</label>
-                             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                                {DECADES.map(decade => (
-                                    <button 
-                                        key={decade}
-                                        onClick={() => {
-                                            setSelectedDecades(prev => 
-                                                prev.includes(decade)
-                                                ? prev.filter(d => d !== decade)
-                                                : [...prev, decade]
-                                            )
-                                        }}
-                                        className={`w-full text-center p-2 rounded-md border text-xs font-medium transition-colors duration-200 ${selectedDecades.includes(decade) ? 'bg-brand/20 border-brand text-brand' : 'bg-panel-light border-border text-text-secondary hover:border-brand/50'}`}
-                                    >
-                                        {decade}
+                    {generationMode === 'multi' && (
+                        <div className="space-y-8">
+                            {/* Step 1: Upload Photos */}
+                            <div>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">1</div>
+                                    <h3 className="text-lg font-bold text-text-primary">Upload Photos</h3>
+                                </div>
+                                <div className="pl-12 mt-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <h4 className="text-sm font-semibold mb-2 text-center text-text-secondary">First Person</h4>
+                                            <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                                        </div>
+                                        <div>
+                                            <h4 className="text-sm font-semibold mb-2 text-center text-text-secondary">Second Person</h4>
+                                            <ImageUploader onImageChange={handleImageTwoChange} imageDataUrl={imageDataUrlTwo} disabled={generationState === GenerationState.LOADING} />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Step 2: Upload Style Reference */}
+                            <div>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">2</div>
+                                    <div>
+                                        <h3 className="text-lg font-bold text-text-primary">Upload Style Reference <span className="text-sm font-normal text-text-secondary">(optional)</span></h3>
+                                        <p className="text-sm text-text-secondary">Upload a third image to guide the mood, composition, and background. The people in this image will be ignored.</p>
+                                    </div>
+                                </div>
+                                <div className="pl-12 mt-4 space-y-4">
+                                    <ImageUploader onImageChange={handleStyleReferenceImageChange} imageDataUrl={styleReferenceImageDataUrl} disabled={generationState === GenerationState.LOADING || isGeneratingScene} />
+                                    <button onClick={handleGenerateSceneFromStyle} disabled={!styleReferenceImage || isGeneratingScene} className="w-full flex items-center justify-center gap-2 p-3 bg-panel-light text-text-primary font-semibold rounded-lg hover:bg-border disabled:opacity-50">
+                                        <WandIcon className="w-5 h-5"/>
+                                        {isGeneratingScene ? 'Generating...' : `Generate Scene from Style (${getCost('prompt_from_image')} Credits)`}
                                     </button>
-                                ))}
-                             </div>
-                             <div className="flex justify-between text-xs">
-                                <button onClick={() => setSelectedDecades(DECADES)} className="text-brand hover:underline">Select All</button>
-                                <button onClick={() => setSelectedDecades([])} className="text-brand hover:underline">Deselect All</button>
-                             </div>
-                         </div>
-                       <button onClick={handleGeneratePastForward} disabled={!uploadedImage || selectedDecades.length === 0 || isGeneratingDecades} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
-                        <ClockRewindIcon className="w-5 h-5"/>
-                        Generate ({selectedDecades.length * getCost('standard_image')} credits)
-                       </button>
-                    </div>
-                 )}
-                 
-                 {generationMode === 'graphic_suite' && (
-                    <div className="space-y-4">
-                      {graphicSuiteTool === 'asset_generator' && (
-                         <div className="space-y-4">
-                            <div className="grid grid-cols-3 gap-2">
-                                <AssetTypeButton label="Illustration" value="illustration" currentValue={assetGeneratorTool} onClick={setAssetGeneratorTool} />
-                                <AssetTypeButton label="Icon" value="icon" currentValue={assetGeneratorTool} onClick={setAssetGeneratorTool} />
-                                <AssetTypeButton label="Pattern" value="pattern" currentValue={assetGeneratorTool} onClick={setAssetGeneratorTool} />
-                            </div>
-                            <textarea
-                                value={graphicPrompt}
-                                onChange={(e) => setGraphicPrompt(e.target.value)}
-                                placeholder={`Describe the ${assetGeneratorTool} you want...`}
-                                className="w-full h-24 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
-                                disabled={generationState === GenerationState.LOADING}
-                            />
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-xs text-text-secondary">Style</label>
-                                    <select value={graphicStyle} onChange={e => setGraphicStyle(e.target.value)} className="w-full p-2 bg-background border border-border rounded-lg text-sm">
-                                        <option>Flat</option>
-                                        <option>3D</option>
-                                        <option>Minimalist</option>
-                                        <option>Watercolor</option>
-                                        <option>Low Poly</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="text-xs text-text-secondary">Count: {graphicCount}</label>
-                                     <input type="range" min="1" max="4" value={graphicCount} onChange={e => setGraphicCount(Number(e.target.value))} className="w-full accent-brand" />
                                 </div>
                             </div>
-                             <button onClick={() => handleGenerateGraphic(assetGeneratorTool)} disabled={!graphicPrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
-                                <SparklesIcon className="w-5 h-5"/>
-                                Generate ({getCost(`graphic_${assetGeneratorTool}` as any) * graphicCount} credits)
-                             </button>
-                         </div>
-                      )}
-                      {graphicSuiteTool === 'logo_maker' && (
-                        <div className="space-y-4">
-                             <textarea
-                                value={graphicPrompt}
-                                onChange={(e) => setGraphicPrompt(e.target.value)}
-                                placeholder="Describe your brand or company..."
-                                className="w-full h-24 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
-                                disabled={generationState === GenerationState.LOADING}
-                            />
-                             <button onClick={() => handleGenerateGraphic('logo_maker')} disabled={!graphicPrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
-                                <SparklesIcon className="w-5 h-5"/>
-                                Generate Logos ({getCost('graphic_logo_maker') * 4} credits)
-                             </button>
+
+                            {/* Step 3: Build Your Scene */}
+                            <div>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">3</div>
+                                    <h3 className="text-lg font-bold text-text-primary">Build Your Scene</h3>
+                                </div>
+                                <div className="pl-12 mt-4 space-y-6">
+                                    {/* Placement */}
+                                    <div>
+                                        <h4 className="text-sm font-medium text-text-secondary mb-2">Placement</h4>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <SceneBuilderButton label="Side-by-side" value="side-by-side" currentValue={multiPersonPlacement} onClick={setMultiPersonPlacement} />
+                                            <SceneBuilderButton label="Person 1 on Left" value="p1-left" currentValue={multiPersonPlacement} onClick={setMultiPersonPlacement} />
+                                            <SceneBuilderButton label="Person 2 on Left" value="p2-left" currentValue={multiPersonPlacement} onClick={setMultiPersonPlacement} />
+                                            <SceneBuilderButton label="One in Front" value="one-in-front" currentValue={multiPersonPlacement} onClick={setMultiPersonPlacement} />
+                                        </div>
+                                    </div>
+                                    {/* Interaction */}
+                                    <div>
+                                        <h4 className="text-sm font-medium text-text-secondary mb-2">Interaction</h4>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <SceneBuilderButton label="Neutral Expression" value="neutral" currentValue={multiPersonInteraction} onClick={setMultiPersonInteraction} />
+                                            <SceneBuilderButton label="Smiling Together" value="smiling" currentValue={multiPersonInteraction} onClick={setMultiPersonInteraction} />
+                                            <SceneBuilderButton label="Looking at Each Other" value="looking-at-each-other" currentValue={multiPersonInteraction} onClick={setMultiPersonInteraction} />
+                                            <SceneBuilderButton label="Hugging" value="hugging" currentValue={multiPersonInteraction} onClick={setMultiPersonInteraction} />
+                                        </div>
+                                    </div>
+                                    {/* Scene Description */}
+                                    <div>
+                                        <h4 className="text-sm font-medium text-text-secondary mb-2">Scene Description</h4>
+                                        <textarea
+                                            value={sceneDescription}
+                                            onChange={(e) => setSceneDescription(e.target.value)}
+                                            placeholder="Describe the entire scene: the background, what they are wearing, the lighting, the overall style. e.g., 'At a beach during sunset, wearing casual summer clothes. The lighting is warm and golden. Style should be a candid, happy photograph.'"
+                                            className="w-full h-28 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
+                                            disabled={generationState === GenerationState.LOADING}
+                                        />
+                                    </div>
+                                    
+                                    <div className="p-4 bg-background border border-border rounded-lg space-y-4">
+                                        <h4 className="text-sm font-semibold">Generation Settings</h4>
+                                        {profile?.plan === 'pro' && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-text-secondary mb-2">Image Size</label>
+                                                <div className="grid grid-cols-2 gap-1 bg-panel-light p-1 rounded-lg border border-border">
+                                                    <button type="button" onClick={() => setImageSize('1024')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${imageSize === '1024' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>Standard <span className="text-xs text-text-tertiary">(1024px)</span></button>
+                                                    <button type="button" onClick={() => setImageSize('2048')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${imageSize === '2048' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>HD <span className="text-xs text-text-tertiary">(2048px)</span></button>
+                                                </div>
+                                            </div>
+                                        )}
+                                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                            <input type="checkbox" checked={useStrictSizing} onChange={e => setUseStrictSizing(e.target.checked)} className="w-4 h-4 rounded text-brand focus:ring-brand bg-panel-light border-border"/>
+                                            <span>Strict sizing</span>
+                                        </label>
+                                        {profile?.plan === 'pro' && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-text-secondary mb-2">Aspect Ratio</label>
+                                                <div className="grid grid-cols-5 gap-1 bg-panel-light p-1 rounded-lg border border-border">
+                                                    {(['1:1', '16:9', '9:16', '4:3', '3:4'] as const).map(ar => (
+                                                        <button key={ar} type="button" onClick={() => setAspectRatio(ar)} className={`py-1.5 text-sm font-semibold rounded-md transition-colors ${aspectRatio === ar ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>{ar}</button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Final Button */}
+                            <div className="pt-4 border-t border-border">
+                                <button onClick={handleGenerateMultiPersonImage} disabled={!sceneDescription.trim() || !uploadedImage || !uploadedImageTwo || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-4 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50 text-lg">
+                                    <SparklesIcon className="w-6 h-6"/>
+                                    Generate Image ({getCost(imageSize === '2048' ? 'hd_image' : 'standard_image')} Credits)
+                                </button>
+                            </div>
                         </div>
-                      )}
-                       {graphicSuiteTool === 'photo_editor' && (
-                           <div className="space-y-4 text-center">
-                               <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
-                               <p className="text-text-secondary text-sm">Upload an image to open it in the Advanced Editor.</p>
-                           </div>
-                       )}
-                       {graphicSuiteTool === 'upscale' && (
-                            <div className="space-y-4">
-                                <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
-                                <button onClick={handleUpscaleGraphic} disabled={!graphicImage || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
-                                    <ArrowsPointingOutIcon className="w-5 h-5"/>
-                                    Upscale Image ({getCost('graphic_upscale')} credits)
-                                </button>
+                    )}
+
+                    {generationMode === 'video' && (
+                         <div className="space-y-4">
+                            <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={generationState === GenerationState.GENERATING_VIDEO} />
+                            <textarea
+                                value={prompt}
+                                onChange={(e) => setPrompt(e.target.value)}
+                                placeholder="Describe the video you want to create..."
+                                className="w-full h-28 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
+                                disabled={generationState === GenerationState.GENERATING_VIDEO}
+                            />
+                             <div className="grid grid-cols-2 gap-4">
+                                <select value={videoAspectRatio} onChange={(e) => setVideoAspectRatio(e.target.value as any)} className="w-full p-2 bg-background border border-border rounded-lg text-sm">
+                                    <option value="16:9">16:9</option>
+                                    <option value="9:16">9:16</option>
+                                    <option value="1:1">1:1</option>
+                                </select>
+                                 <div>
+                                    <label className="text-xs text-text-secondary">Motion Level: {videoMotionLevel}</label>
+                                    <input type="range" min="1" max="10" value={videoMotionLevel} onChange={e => setVideoMotionLevel(Number(e.target.value))} className="w-full accent-brand" />
+                                </div>
                             </div>
-                       )}
-                        {graphicSuiteTool === 'remove_background' && (
-                            <div className="space-y-4">
-                                <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
-                                <button onClick={handleRemoveBackground} disabled={!graphicImage || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
-                                    <ScissorsIcon className="w-5 h-5"/>
-                                    Remove Background ({getCost('graphic_remove_background')} credits)
-                                </button>
+                            <div>
+                                <label className="text-xs text-text-secondary">Seed (0 for random)</label>
+                                <input type="number" value={videoSeed} onChange={e => setVideoSeed(Number(e.target.value))} className="w-full p-2 bg-background border border-border rounded-lg text-sm" />
                             </div>
-                       )}
-                       {graphicSuiteTool === 'replace_background' && (
-                            <div className="space-y-4">
-                                <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
-                                 <textarea
-                                    value={replaceBackgroundPrompt}
-                                    onChange={(e) => setReplaceBackgroundPrompt(e.target.value)}
-                                    placeholder="Describe the new background..."
+                           <button onClick={handleGenerateVideo} disabled={!prompt.trim() || generationState === GenerationState.GENERATING_VIDEO} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                            <VideoCameraIcon className="w-5 h-5"/>
+                            Generate Video ({getCost('video_generation')} credits)
+                           </button>
+                        </div>
+                    )}
+                    
+                    {generationMode === 'restore' && (
+                         <div className="space-y-4">
+                            <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                             <div className="space-y-4 p-4 bg-background rounded-lg border border-border">
+                                <RestoreOption id="enhanceFaces" label="Enhance Faces" description="Improve clarity and detail in faces." checked={restoreOptions.enhanceFaces} onChange={e => setRestoreOptions(p => ({...p, enhanceFaces: e.target.checked}))} disabled={generationState === GenerationState.LOADING} />
+                                <RestoreOption id="removeScratches" label="Remove Scratches" description="Fix dust, scratches, and blemishes." checked={restoreOptions.removeScratches} onChange={e => setRestoreOptions(p => ({...p, removeScratches: e.target.checked}))} disabled={generationState === GenerationState.LOADING} />
+                                <RestoreOption id="colorize" label="Colorize" description="Add realistic colors to B&W photos." checked={restoreOptions.colorize} onChange={e => setRestoreOptions(p => ({...p, colorize: e.target.checked}))} disabled={generationState === GenerationState.LOADING} />
+                                 <RestoreOption id="upscale" label="Upscale to 4K" description="Increase image resolution and quality." checked={restoreOptions.upscale} onChange={e => setRestoreOptions(p => ({...p, upscale: e.target.checked}))} disabled={generationState === GenerationState.LOADING} isProFeature />
+                             </div>
+                           <button onClick={handleRestoreImage} disabled={!uploadedImage || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                            <WandIcon className="w-5 h-5"/>
+                            Restore Image ({getCost('image_restore')} credits)
+                           </button>
+                        </div>
+                    )}
+
+                    {generationMode === 'past_forward' && (
+                         <div className="space-y-4">
+                            <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={isGeneratingDecades} />
+                             <div className="space-y-2">
+                                 <label className="text-sm font-semibold text-text-secondary">Select Decades</label>
+                                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                                    {DECADES.map(decade => (
+                                        <button 
+                                            key={decade}
+                                            onClick={() => {
+                                                setSelectedDecades(prev => 
+                                                    prev.includes(decade)
+                                                    ? prev.filter(d => d !== decade)
+                                                    : [...prev, decade]
+                                                )
+                                            }}
+                                            className={`w-full text-center p-2 rounded-md border text-xs font-medium transition-colors duration-200 ${selectedDecades.includes(decade) ? 'bg-brand/20 border-brand text-brand' : 'bg-panel-light border-border text-text-secondary hover:border-brand/50'}`}
+                                        >
+                                            {decade}
+                                        </button>
+                                    ))}
+                                 </div>
+                                 <div className="flex justify-between text-xs">
+                                    <button onClick={() => setSelectedDecades(DECADES)} className="text-brand hover:underline">Select All</button>
+                                    <button onClick={() => setSelectedDecades([])} className="text-brand hover:underline">Deselect All</button>
+                                 </div>
+                             </div>
+                           <button onClick={handleGeneratePastForward} disabled={!uploadedImage || selectedDecades.length === 0 || isGeneratingDecades} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                            <ClockRewindIcon className="w-5 h-5"/>
+                            Generate ({selectedDecades.length * getCost('standard_image')} credits)
+                           </button>
+                        </div>
+                    )}
+                    
+                    {generationMode === 'graphic_suite' && (
+                        <div className="space-y-4">
+                          {graphicSuiteTool === 'asset_generator' && (
+                             <div className="space-y-4">
+                                <div className="grid grid-cols-3 gap-2">
+                                    <AssetTypeButton label="Illustration" value="illustration" currentValue={assetGeneratorTool} onClick={setAssetGeneratorTool} />
+                                    <AssetTypeButton label="Icon" value="icon" currentValue={assetGeneratorTool} onClick={setAssetGeneratorTool} />
+                                    <AssetTypeButton label="Pattern" value="pattern" currentValue={assetGeneratorTool} onClick={setAssetGeneratorTool} />
+                                </div>
+                                <textarea
+                                    value={graphicPrompt}
+                                    onChange={(e) => setGraphicPrompt(e.target.value)}
+                                    placeholder={`Describe the ${assetGeneratorTool} you want...`}
                                     className="w-full h-24 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
                                     disabled={generationState === GenerationState.LOADING}
                                 />
-                                <button onClick={handleReplaceBackground} disabled={!graphicImage || !replaceBackgroundPrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
-                                    <GlobeAltIcon className="w-5 h-5"/>
-                                    Replace Background ({getCost('graphic_replace_background')} credits)
-                                </button>
-                            </div>
-                       )}
-                       {graphicSuiteTool === 'colorize' && (
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-xs text-text-secondary">Style</label>
+                                        <select value={graphicStyle} onChange={e => setGraphicStyle(e.target.value)} className="w-full p-2 bg-background border border-border rounded-lg text-sm">
+                                            <option>Flat</option>
+                                            <option>3D</option>
+                                            <option>Minimalist</option>
+                                            <option>Watercolor</option>
+                                            <option>Low Poly</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-text-secondary">Count: {graphicCount}</label>
+                                         <input type="range" min="1" max="4" value={graphicCount} onChange={e => setGraphicCount(Number(e.target.value))} className="w-full accent-brand" />
+                                    </div>
+                                </div>
+                                 <button onClick={() => handleGenerateGraphic(assetGeneratorTool)} disabled={!graphicPrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                    <SparklesIcon className="w-5 h-5"/>
+                                    Generate ({getCost(`graphic_${assetGeneratorTool}` as any) * graphicCount} credits)
+                                 </button>
+                             </div>
+                          )}
+                          {graphicSuiteTool === 'logo_maker' && (
                             <div className="space-y-4">
-                                <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
-                                <button onClick={handleColorizeGraphic} disabled={!graphicImage || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
-                                    <SwatchIcon className="w-5 h-5"/>
-                                    Colorize Image ({getCost('graphic_colorize')} credits)
-                                </button>
+                                 <textarea
+                                    value={graphicPrompt}
+                                    onChange={(e) => setGraphicPrompt(e.target.value)}
+                                    placeholder="Describe your brand or company..."
+                                    className="w-full h-24 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
+                                    disabled={generationState === GenerationState.LOADING}
+                                />
+                                 <button onClick={() => handleGenerateGraphic('logo_maker')} disabled={!graphicPrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                    <SparklesIcon className="w-5 h-5"/>
+                                    Generate Logos ({getCost('graphic_logo_maker') * 4} credits)
+                                 </button>
                             </div>
-                       )}
+                          )}
+                           {graphicSuiteTool === 'photo_editor' && (
+                               <div className="space-y-4 text-center">
+                                   <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                                   <p className="text-text-secondary text-sm">Upload an image to open it in the Advanced Editor.</p>
+                               </div>
+                           )}
+                           {graphicSuiteTool === 'upscale' && (
+                                <div className="space-y-4">
+                                    <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                                    <button onClick={handleUpscaleGraphic} disabled={!graphicImage || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                        <ArrowsPointingOutIcon className="w-5 h-5"/>
+                                        Upscale Image ({getCost('graphic_upscale')} credits)
+                                    </button>
+                                </div>
+                           )}
+                            {graphicSuiteTool === 'remove_background' && (
+                                <div className="space-y-4">
+                                    <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                                    <button onClick={handleRemoveBackground} disabled={!graphicImage || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                        <ScissorsIcon className="w-5 h-5"/>
+                                        Remove Background ({getCost('graphic_remove_background')} credits)
+                                    </button>
+                                </div>
+                           )}
+                           {graphicSuiteTool === 'replace_background' && (
+                                <div className="space-y-4">
+                                    <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                                     <textarea
+                                        value={replaceBackgroundPrompt}
+                                        onChange={(e) => setReplaceBackgroundPrompt(e.target.value)}
+                                        placeholder="Describe the new background..."
+                                        className="w-full h-24 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
+                                        disabled={generationState === GenerationState.LOADING}
+                                    />
+                                    <button onClick={handleReplaceBackground} disabled={!graphicImage || !replaceBackgroundPrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                        <GlobeAltIcon className="w-5 h-5"/>
+                                        Replace Background ({getCost('graphic_replace_background')} credits)
+                                    </button>
+                                </div>
+                           )}
+                           {graphicSuiteTool === 'colorize' && (
+                                <div className="space-y-4">
+                                    <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                                    <button onClick={handleColorizeGraphic} disabled={!graphicImage || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                        <SwatchIcon className="w-5 h-5"/>
+                                        Colorize Image ({getCost('graphic_colorize')} credits)
+                                    </button>
+                                </div>
+                           )}
 
-                    </div>
-                 )}
+                        </div>
+                    )}
 
-                 {generationMode === 'architecture_suite' && (
-                    <div className="space-y-4">
-                         <ImageUploader onImageChange={handleArchitectureImageChange} imageDataUrl={architectureImageDataUrl} disabled={generationState === GenerationState.LOADING} />
-                        <textarea
-                            value={architecturePrompt}
-                            onChange={(e) => setArchitecturePrompt(e.target.value)}
-                            placeholder="e.g., 'A modern style with large windows and a wooden facade'"
-                            className="w-full h-28 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
-                            disabled={generationState === GenerationState.LOADING}
-                        />
-                        <button onClick={handleGenerateArchitecture} disabled={!architectureImage || !architecturePrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
-                            <SparklesIcon className="w-5 h-5"/>
-                            Generate {architectureSuiteTool.charAt(0).toUpperCase() + architectureSuiteTool.slice(1)} ({getCost(`architecture_${architectureSuiteTool}` as keyof Omit<CreditCostSettings, 'id'>)} credits)
-                        </button>
-                    </div>
-                 )}
-              </div>
+                    {generationMode === 'architecture_suite' && (
+                        <div className="space-y-4">
+                             <ImageUploader onImageChange={handleArchitectureImageChange} imageDataUrl={architectureImageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                            <textarea
+                                value={architecturePrompt}
+                                onChange={(e) => setArchitecturePrompt(e.target.value)}
+                                placeholder="e.g., 'A modern style with large windows and a wooden facade'"
+                                className="w-full h-28 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
+                                disabled={generationState === GenerationState.LOADING}
+                            />
+                            <button onClick={handleGenerateArchitecture} disabled={!architectureImage || !architecturePrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                <SparklesIcon className="w-5 h-5"/>
+                                Generate {architectureSuiteTool.charAt(0).toUpperCase() + architectureSuiteTool.slice(1)} ({getCost(`architecture_${architectureSuiteTool}` as keyof Omit<CreditCostSettings, 'id'>)} credits)
+                            </button>
+                        </div>
+                    )}
+                  </div>
 
-              {/* Right Column: Display */}
-              <div className="bg-panel p-6 rounded-2xl border border-border flex items-center justify-center sticky top-8" style={{minHeight: '400px'}}>
-                  {generationMode === 'past_forward' ? (
-                      <PastForwardGrid
-                        generations={decadeGenerations}
-                        onRegenerate={handleRegenerateDecade}
-                        isGenerating={isGeneratingDecades}
-                        uploadedImage={!!uploadedImage}
-                        onDownloadAlbum={handleDownloadAlbum}
-                        downloadingFormat={downloadingFormat}
-                      />
-                  ) : renderGenerationResult() }
-              </div>
+                  {/* Right Column: Display */}
+                  <div className="bg-panel p-6 rounded-2xl border border-border flex items-center justify-center sticky top-8" style={{minHeight: '400px'}}>
+                      {generationMode === 'past_forward' ? (
+                          <PastForwardGrid
+                            generations={decadeGenerations}
+                            onRegenerate={handleRegenerateDecade}
+                            isGenerating={isGeneratingDecades}
+                            uploadedImage={!!uploadedImage}
+                            onDownloadAlbum={handleDownloadAlbum}
+                            downloadingFormat={downloadingFormat}
+                          />
+                      ) : renderGenerationResult() }
+                  </div>
+                </div>
+                
+                {session && historyImageUrls.length > 0 && (
+                    <HistoryDisplay imageUrls={historyImageUrls} onClear={handleClearHistory} />
+                )}
+
+                <Footer onContactClick={() => setIsContactModalOpen(true)} />
+              </main>
             </div>
-            
-            {session && historyImageUrls.length > 0 && (
-                <HistoryDisplay imageUrls={historyImageUrls} onClear={handleClearHistory} />
-            )}
-
-            <Footer onContactClick={() => setIsContactModalOpen(true)} />
-          </main>
+          </div>
         </div>
-      </div>
-      
-      {authModalView && <Auth initialView={authModalView} onClose={() => setAuthModalView(null)} />}
+      )}
+
+      {/* Global Modals */}
+      {authModalView && <Auth initialView={authModalView} onClose={() => setAuthModalView(null)} selectedPlan={selectedPlanForSignup} />}
       
       {(isMembershipModalOpen || isMembershipPromoOpen) && proPlan && profile && (
         <MembershipModal
@@ -2246,7 +2266,7 @@ const App: React.FC = () => {
       )}
       
       {/* Chat toggle button */}
-      {session && profile && (
+      {appLaunched && session && profile && (
         <button
           onClick={() => setIsChatOpen(prev => !prev)}
           className="fixed bottom-6 right-6 w-16 h-16 bg-brand text-white rounded-full shadow-lg flex items-center justify-center transform hover:-translate-y-1 transition-transform z-50"
@@ -2255,8 +2275,7 @@ const App: React.FC = () => {
           {isChatOpen ? <XMarkIcon className="w-8 h-8"/> : <ChatBubbleLeftRightIcon className="w-8 h-8"/>}
         </button>
       )}
-
-    </div>
+    </>
   );
 };
 

@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { XMarkIcon } from './Icons';
@@ -8,11 +9,12 @@ import { countryList } from '../constants';
 interface AuthProps {
   initialView: 'sign_in' | 'sign_up';
   onClose: () => void;
+  selectedPlan?: string | null;
 }
 
 type AuthView = 'sign_in' | 'sign_up';
 
-const Auth: React.FC<AuthProps> = ({ initialView, onClose }) => {
+const Auth: React.FC<AuthProps> = ({ initialView, onClose, selectedPlan }) => {
   const [view, setView] = useState<AuthView>(initialView);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -78,10 +80,10 @@ const Auth: React.FC<AuthProps> = ({ initialView, onClose }) => {
         <div className="p-8 space-y-6">
           <div>
             <h2 className="text-3xl font-bold text-center text-text-primary">
-              {view === 'sign_in' ? 'Welcome Back' : 'Create an Account'}
+              {view === 'sign_in' ? 'Welcome Back' : `Create ${selectedPlan === 'pro' ? 'a Pro' : 'an'} Account`}
             </h2>
             <p className="text-center text-text-secondary mt-2">
-              {view === 'sign_in' ? 'Sign in to continue.' : 'Sign up to start generating.'}
+              {view === 'sign_in' ? 'Sign in to continue.' : `Sign up to get started with your ${selectedPlan === 'pro' ? 'Pro' : 'Free'} plan.`}
             </p>
           </div>
 

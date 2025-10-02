@@ -179,11 +179,11 @@ const Sidebar: React.FC<SidebarProps> = ({ generationMode, graphicSuiteTool, onM
   return (
     <aside className={`bg-panel border-r border-border p-4 flex flex-col fixed lg:relative inset-y-0 left-0 z-50 w-64 lg:w-auto transition-transform lg:transition-all duration-300 ease-in-out ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 ${isCollapsed ? 'lg:w-24' : 'lg:w-64'}`}>
       {/* FIX: Made the logo a clickable button to go home */}
-      <button onClick={onGoHome} className="flex flex-col items-center text-center mb-8 w-full">
+      <button onClick={onGoHome} className="flex flex-col items-center text-center mb-4 w-full">
         <img 
             src="https://zsdecor.pk/wp-content/uploads/2025/09/1.png" 
             alt="BestAI Logo" 
-            className="h-16 w-auto"
+            className="h-10 w-auto"
         />
       </button>
       <nav className="flex-grow overflow-y-auto">

@@ -15,6 +15,7 @@ interface HeaderProps {
   onUpgradeClick: () => void;
   onAdminPanelClick: () => void;
   onToggleMobileSidebar: () => void;
+  onGoHome: () => void;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -27,6 +28,7 @@ const Header: React.FC<HeaderProps> = ({
   onUpgradeClick,
   onAdminPanelClick,
   onToggleMobileSidebar,
+  onGoHome,
 }) => {
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
@@ -131,13 +133,22 @@ const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="flex justify-between items-center mb-8 lg:justify-end">
-        <button
-            className="p-2 -ml-2 text-text-secondary lg:hidden"
-            onClick={onToggleMobileSidebar}
-            aria-label="Open menu"
-        >
-            <Bars3Icon className="w-8 h-8" />
-        </button>
+        <div className="flex items-center gap-4 lg:hidden">
+            <button
+                className="p-2 -ml-2 text-text-secondary"
+                onClick={onToggleMobileSidebar}
+                aria-label="Open menu"
+            >
+                <Bars3Icon className="w-8 h-8" />
+            </button>
+            <button onClick={onGoHome} aria-label="Go to homepage">
+                 <img 
+                    src="https://zsdecor.pk/wp-content/uploads/2025/09/1.png" 
+                    alt="BestAI Logo" 
+                    className="h-8 w-auto"
+                />
+            </button>
+        </div>
       {renderAuthSection()}
     </header>
   );
