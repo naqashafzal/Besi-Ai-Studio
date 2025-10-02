@@ -1,4 +1,5 @@
 
+
 # BestAI Portrait Generator
 
 [![Author](https://img.shields.io/badge/Author-Naqash%20Afzal-blue.svg)](https://github.com/naqashafzal)
@@ -6,7 +7,7 @@
 
 Transform your photos into professional headshots, epic sci-fi portraits, or creative characters using the power of Google's Gemini AI. This advanced web application provides a seamless user experience for generating high-quality images and videos with a rich set of features for both users and administrators.
 
-**Live Demo:** [**portrait.bestai.website**](https://portrait.bestai.website)
+**Live Demo:** [**ai.nullpk.com**](https://ai.nullpk.com)
 
  <!-- Replace with an actual screenshot -->
 
@@ -22,6 +23,12 @@ Transform your photos into professional headshots, epic sci-fi portraits, or cre
   - **Multi-Person Mode:** Combine people from two separate photos into one cohesive image.
   - **Style Reference:** Use a third image to guide the mood, lighting, and background of a multi-person generation.
   - **HD & Aspect Ratios:** Pro users can generate images in stunning 2048px HD and choose from various aspect ratios (16:9, 9:16, 4:3, 3:4).
+
+- **Graphic Design Suite:**
+  - **Icon Generator:** Create unique icons from text prompts with various style presets.
+  - **Illustration Generator:** Produce detailed illustrations for any concept.
+  - **Pattern Generator:** Generate seamless, tileable patterns from a description.
+  - **Image to Vector (Pro):** Convert raster images (PNG, JPG) into scalable SVG vector graphics.
 
 - **AI-Powered Prompting:**
   - **Prompt from Image:** Upload a photo and let AI generate a detailed, descriptive prompt for you.
@@ -55,8 +62,9 @@ Transform your photos into professional headshots, epic sci-fi portraits, or cre
 
 - **Frontend:** React, TypeScript, Tailwind CSS
 - **AI Model:** Google Gemini API
-  - `gemini-2.5-flash`: For chat and prompt generation.
+  - `gemini-2.5-flash`: For chat, prompt generation, and vectorization.
   - `gemini-2.5-flash-image-preview`: For powerful image editing and generation.
+  - `imagen-4.0-generate-001`: For graphic design asset generation (icons, illustrations).
   - `veo-2.0-generate-001`: For state-of-the-art video generation.
 - **Backend & Database:** Supabase (Authentication, PostgreSQL Database, Storage, Edge Functions)
 - **API Security:** Node.js & Express.js proxy server to protect the Gemini API key.

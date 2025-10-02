@@ -1,14 +1,12 @@
 
-
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { GenerationState, GenerativePart, PromptCategory, Prompt, Session, UserProfile, VisitorProfile, Plan, PaymentSettings, PlanCountryPrice, ContactFormData, ChatMessage, Coupon, CreditCostSettings } from './types';
-import { generateImage, generateMultiPersonImage, generatePromptFromImage, createChat, generateVideo } from './services/geminiService';
+import { GenerationState, GenerativePart, PromptCategory, Prompt, Session, UserProfile, VisitorProfile, Plan, PaymentSettings, PlanCountryPrice, ContactFormData, ChatMessage, Coupon, CreditCostSettings, DecadeGeneration, GraphicSuiteTool, ArchitectureSuiteTool } from './types';
+import { generateImage, generateMultiPersonImage, generatePromptFromImage, createChat, generateVideo, generateSceneDescriptionFromImage, restoreImage, editImage, generateGraphic, upscaleImage, removeBackground, replaceBackground, colorizeGraphic, generateArchitectureImage } from './services/geminiService';
 import * as adminService from './services/adminService';
 import * as couponService from './services/couponService';
 import { supabase } from './services/supabaseClient';
 import { DEFAULT_PLANS, VIDEO_LOADING_MESSAGES } from './constants';
-import { SparklesIcon, PhotoIcon, UsersIcon, StarIcon, MailIcon, XMarkIcon, ChatBubbleLeftRightIcon, VideoCameraIcon, RefreshIcon } from './components/Icons';
+import { SparklesIcon, PhotoIcon, UsersIcon, StarIcon, MailIcon, XMarkIcon, ChatBubbleLeftRightIcon, VideoCameraIcon, RefreshIcon, WandIcon, PaintBrushIcon, UserCircleIcon, ClockRewindIcon, CubeTransparentIcon, VectorSquareIcon, DownloadIcon, ArrowsPointingOutIcon, ScissorsIcon, GlobeAltIcon, SwatchIcon, HomeModernIcon } from './components/Icons';
 import LoadingIndicator from './components/LoadingIndicator';
 import ImageDisplay from './components/ImageDisplay';
 import ImageUploader from './components/ImageUploader';
@@ -21,10 +19,72 @@ import Footer from './components/Footer';
 import ChatBox from './components/ChatBox';
 import VideoPlayer from './components/VideoPlayer';
 import HistoryDisplay from './components/HistoryDisplay';
+import PastForwardGrid from './components/PastForwardGrid';
 import { Chat } from '@google/genai';
 import { fileToGenerativePart, dataUrlToFile } from './utils/fileHelpers';
+import { createAlbum } from './utils/albumUtils';
 import ContactModal from './components/ContactModal';
+import AdvancedEditor from './components/AdvancedEditor';
+import Sidebar from './components/Sidebar';
+import LandingPage from './components/LandingPage';
 
+
+const SceneBuilderButton = ({ label, value, currentValue, onClick, disabled = false }: { label: string, value: string, currentValue: string, onClick: (value: string) => void, disabled?: boolean }) => (
+    <button
+        type="button"
+        onClick={() => onClick(value)}
+        disabled={disabled}
+        className={`w-full text-center p-2 rounded-md border text-xs font-medium transition-colors duration-200 disabled:opacity-50 ${
+            currentValue === value
+            ? 'bg-brand/20 border-brand text-brand'
+            : 'bg-panel-light border-border text-text-secondary hover:border-brand/50 hover:text-text-primary'
+        }`}
+    >
+        {label}
+    </button>
+);
+
+const AssetTypeButton = ({ label, value, currentValue, onClick, disabled = false }: { label: string, value: string, currentValue: string, onClick: (value: any) => void, disabled?: boolean }) => (
+    <button
+        type="button"
+        onClick={() => onClick(value)}
+        disabled={disabled}
+        className={`w-full text-center py-2 rounded-md border text-sm font-medium transition-colors duration-200 disabled:opacity-50 ${
+            currentValue === value
+            ? 'bg-brand text-white shadow'
+            : 'bg-panel-light border-border text-text-secondary hover:bg-border'
+        }`}
+    >
+        {label}
+    </button>
+);
+
+const RestoreOption = ({ id, label, description, checked, onChange, disabled, isProFeature = false }: { id: string, label: string, description: string, checked: boolean, onChange: (e: React.ChangeEvent<HTMLInputElement>) => void, disabled: boolean, isProFeature?: boolean }) => (
+    <div className="relative flex items-start">
+        <div className="flex h-6 items-center">
+            <input
+                id={id}
+                type="checkbox"
+                checked={checked}
+                onChange={onChange}
+                disabled={disabled}
+                className="h-4 w-4 rounded border-border bg-background text-brand focus:ring-brand disabled:opacity-50"
+            />
+        </div>
+        <div className="ml-3 text-sm leading-6">
+            <label htmlFor={id} className="font-medium text-text-primary flex items-center gap-2">
+                {label}
+                {isProFeature && (
+                    <span className="flex items-center gap-1 px-1.5 py-0.5 bg-brand-secondary text-background font-bold rounded-full text-[10px] leading-none">
+                        <StarIcon className="w-2.5 h-2.5" />
+                        PRO
+                    </span>
+                )}
+            </label>
+            <p className="text-text-secondary">{description}</p>
+        </div>
+    </div>
+);
 
 
 const App: React.FC = () => {
@@ -34,6 +94,9 @@ const App: React.FC = () => {
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   
+  // App Entry State
+  const [appLaunched, setAppLaunched] = useState(false);
+
   // Auth & Profile state
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -47,7 +110,7 @@ const App: React.FC = () => {
   const [coupons, setCoupons] = useState<Coupon[]>([]);
 
   // Generation Mode
-  const [generationMode, setGenerationMode] = useState<'single' | 'multi' | 'video'>('single');
+  const [generationMode, setGenerationMode] = useState<'single' | 'multi' | 'video' | 'past_forward' | 'restore' | 'graphic_suite' | 'architecture_suite'>('single');
   const [generationFidelity, setGenerationFidelity] = useState<'creative' | 'fidelity'>('creative');
   const [useCannyEdges, setUseCannyEdges] = useState<boolean>(false);
   
@@ -59,7 +122,14 @@ const App: React.FC = () => {
   const [styleReferenceImage, setStyleReferenceImage] = useState<File | null>(null);
   const [styleReferenceImageDataUrl, setStyleReferenceImageDataUrl] = useState<string | null>(null);
   const [imageSize, setImageSize] = useState<'1024' | '2048'>('1024');
+  const [useStrictSizing, setUseStrictSizing] = useState<boolean>(false);
   const [aspectRatio, setAspectRatio] = useState<'1:1' | '16:9' | '9:16' | '4:3' | '3:4'>('1:1');
+
+  // Multi-person scene builder state
+  const [multiPersonPlacement, setMultiPersonPlacement] = useState<string>('side-by-side');
+  const [multiPersonInteraction, setMultiPersonInteraction] = useState<string>('neutral');
+  const [sceneDescription, setSceneDescription] = useState<string>('');
+  const [isGeneratingScene, setIsGeneratingScene] = useState(false);
 
   // Video states
   const [videoAspectRatio, setVideoAspectRatio] = useState<'16:9' | '9:16' | '1:1'>('16:9');
@@ -77,6 +147,7 @@ const App: React.FC = () => {
     background: true,
     clothing: true,
     lighting: true,
+    dimension: true,
   });
   const allPromptFocusSelected = Object.values(promptFocus).every(Boolean);
   const somePromptFocusSelected = Object.values(promptFocus).some(Boolean) && !allPromptFocusSelected;
@@ -114,6 +185,47 @@ const App: React.FC = () => {
 
   // History state
   const [historyImageUrls, setHistoryImageUrls] = useState<string[]>([]);
+  
+  // Past Forward state
+  const DECADES = ['1920s', '1940s', '1950s', '1960s', '1970s', '1980s', '1990s', '2000s', '2010s', '2020s', '2030s'];
+  const [decadeGenerations, setDecadeGenerations] = useState<Record<string, DecadeGeneration>>({});
+  const [selectedDecades, setSelectedDecades] = useState<string[]>(DECADES);
+  const [isGeneratingDecades, setIsGeneratingDecades] = useState(false);
+  const [downloadingFormat, setDownloadingFormat] = useState<'jpeg' | 'png' | null>(null);
+
+  // Restore state
+  const [restoreOptions, setRestoreOptions] = useState({
+    upscale: false,
+    removeScratches: true,
+    colorize: false,
+    enhanceFaces: true,
+  });
+
+  // Editor state
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [editorHistory, setEditorHistory] = useState<string[]>([]);
+
+  // Graphic Suite State
+  const [graphicSuiteTool, setGraphicSuiteTool] = useState<GraphicSuiteTool>('asset_generator');
+  const [assetGeneratorTool, setAssetGeneratorTool] = useState<'illustration' | 'icon' | 'pattern'>('illustration');
+  const [graphicPrompt, setGraphicPrompt] = useState('');
+  const [graphicStyle, setGraphicStyle] = useState('Flat');
+  const [graphicCount, setGraphicCount] = useState(4);
+  const [generatedSvgs, setGeneratedSvgs] = useState<string[] | null>(null);
+  const [graphicImage, setGraphicImage] = useState<File | null>(null);
+  const [graphicImageDataUrl, setGraphicImageDataUrl] = useState<string | null>(null);
+  const [replaceBackgroundPrompt, setReplaceBackgroundPrompt] = useState('');
+
+  // Architecture Suite State
+  const [architectureSuiteTool, setArchitectureSuiteTool] = useState<ArchitectureSuiteTool>('exterior');
+  const [architecturePrompt, setArchitecturePrompt] = useState('');
+  const [architectureImage, setArchitectureImage] = useState<File | null>(null);
+  const [architectureImageDataUrl, setArchitectureImageDataUrl] = useState<string | null>(null);
+
+  // UI State
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
 
   // --- Credit Costs ---
   const DEFAULT_CREDIT_COSTS: CreditCostSettings = {
@@ -123,6 +235,19 @@ const App: React.FC = () => {
     prompt_from_image: 2,
     chat_message: 1,
     video_generation: 250,
+    image_restore: 15,
+    image_edit: 20,
+    graphic_icon: 5,
+    graphic_illustration: 8,
+    graphic_logo_maker: 15,
+    graphic_pattern: 10,
+    graphic_upscale: 15,
+    graphic_remove_background: 5,
+    graphic_replace_background: 10,
+    graphic_colorize: 10,
+    architecture_exterior: 25,
+    architecture_interior: 25,
+    architecture_landscape: 25,
   };
 
   const getCost = (feature: keyof Omit<CreditCostSettings, 'id'>): number => {
@@ -418,13 +543,29 @@ const App: React.FC = () => {
     }
   }, [session, plans]);
   
-  const handleModeChange = useCallback((mode: 'single' | 'multi' | 'video') => {
+  const handleModeChange = useCallback((mode: 'single' | 'multi' | 'video' | 'past_forward' | 'restore' | 'graphic_suite' | 'architecture_suite') => {
     setGenerationMode(mode);
     setGeneratedImageUrls(null);
     setGeneratedVideoUrl(null);
+    setGeneratedSvgs(null);
     setGenerationState(GenerationState.IDLE);
     setError(null);
   }, []);
+
+  const handleGraphicToolChange = useCallback((tool: GraphicSuiteTool) => {
+    if (generationMode !== 'graphic_suite') {
+      handleModeChange('graphic_suite');
+    }
+    setGraphicSuiteTool(tool);
+    setAssetGeneratorTool('illustration'); // Reset sub-tool when changing main tool
+  }, [generationMode, handleModeChange]);
+
+  const handleArchitectureToolChange = useCallback((tool: ArchitectureSuiteTool) => {
+    if (generationMode !== 'architecture_suite') {
+      handleModeChange('architecture_suite');
+    }
+    setArchitectureSuiteTool(tool);
+  }, [generationMode, handleModeChange]);
   
   // Reset premium/admin features if user plan/role changes or they log out
   useEffect(() => {
@@ -536,11 +677,12 @@ const App: React.FC = () => {
         if (isMembershipModalOpen) setIsMembershipModalOpen(false);
         if (isMembershipPromoOpen) setIsMembershipPromoOpen(false);
         if (authModalView) setAuthModalView(null);
+        if (isEditorOpen) setIsEditorOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [profile, isChatOpen, isAdminPanelOpen, isContactModalOpen, isMembershipModalOpen, isMembershipPromoOpen, authModalView]);
+  }, [profile, isChatOpen, isAdminPanelOpen, isContactModalOpen, isMembershipModalOpen, isMembershipPromoOpen, authModalView, isEditorOpen]);
   
   // Admin Data Fetching
   useEffect(() => {
@@ -562,6 +704,19 @@ const App: React.FC = () => {
     };
     fetchAdminData();
   }, [isAdminPanelOpen, profile?.role]);
+  
+  // Initialize Past Forward state when mode changes
+  useEffect(() => {
+    if (generationMode === 'past_forward') {
+        const initialGenerations: Record<string, DecadeGeneration> = {};
+        DECADES.forEach(decade => {
+            initialGenerations[decade] = { status: 'idle', url: null };
+        });
+        setDecadeGenerations(initialGenerations);
+    } else {
+        setDecadeGenerations({});
+    }
+  }, [generationMode]);
 
 
   const handleImageChange = (file: File | null) => {
@@ -611,6 +766,39 @@ const App: React.FC = () => {
       setPromptGenImageDataUrl(null);
     }
   };
+
+  const handleGraphicImageChange = (file: File | null) => {
+    if (file) {
+      setGraphicImage(file);
+      const reader = new FileReader();
+      reader.onload = (e) => setGraphicImageDataUrl(e.target?.result as string);
+      reader.readAsDataURL(file);
+       if (generationMode === 'graphic_suite' && graphicSuiteTool === 'photo_editor') {
+          if (!session) {
+            setError("Image editing is for logged-in users only.");
+            setAuthModalView('sign_up');
+            return;
+          }
+          setEditorHistory([]); // Reset history for new image
+          setIsEditorOpen(true);
+       }
+    } else {
+      setGraphicImage(null);
+      setGraphicImageDataUrl(null);
+    }
+  };
+
+  const handleArchitectureImageChange = (file: File | null) => {
+    if (file) {
+      setArchitectureImage(file);
+      const reader = new FileReader();
+      reader.onload = (e) => setArchitectureImageDataUrl(e.target?.result as string);
+      reader.readAsDataURL(file);
+    } else {
+      setArchitectureImage(null);
+      setArchitectureImageDataUrl(null);
+    }
+  };
   
   const selectAllPromptFocusRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -629,6 +817,7 @@ const App: React.FC = () => {
         background: isChecked,
         clothing: isChecked,
         lighting: isChecked,
+        dimension: isChecked,
     });
   };
 
@@ -686,7 +875,7 @@ const App: React.FC = () => {
         setGeneratedImageUrls(null);
         try {
           const baseImagePart = await fileToGenerativePart(uploadedImage);
-          const imageUrls = await generateImage(prompt, baseImagePart, imageSize, aspectRatio, generationFidelity, useCannyEdges);
+          const imageUrls = await generateImage(prompt, baseImagePart, imageSize, aspectRatio, generationFidelity, useCannyEdges, useStrictSizing);
           
           setGeneratedImageUrls(imageUrls);
           setGenerationState(GenerationState.SUCCESS);
@@ -722,7 +911,37 @@ const App: React.FC = () => {
             setGenerationState(GenerationState.QUEUED);
         }
     }
-  }, [prompt, uploadedImage, session, profile, visitorProfile, queue, visitorId, imageSize, aspectRatio, deductCredits, generationFidelity, useCannyEdges, creditCostSettings]);
+  }, [prompt, uploadedImage, session, profile, visitorProfile, queue, visitorId, imageSize, aspectRatio, deductCredits, generationFidelity, useCannyEdges, useStrictSizing, creditCostSettings]);
+
+  const handleGenerateSceneFromStyle = async () => {
+    if (!styleReferenceImage) {
+        setError("Please upload a style reference image first.");
+        return;
+    }
+    if (!session) {
+        setError("This feature is for logged-in users only.");
+        setAuthModalView('sign_up');
+        return;
+    }
+
+    const cost = getCost('prompt_from_image');
+    const canProceed = await deductCredits(cost);
+    if (!canProceed) return;
+
+    setIsGeneratingScene(true);
+    setError(null);
+    try {
+        const imagePart = await fileToGenerativePart(styleReferenceImage);
+        const generatedDescription = await generateSceneDescriptionFromImage(imagePart);
+        setSceneDescription(generatedDescription);
+    } catch (err) {
+        console.error(err);
+        setError(err instanceof Error ? err.message : 'An unknown error occurred during scene generation.');
+        updateUserCredits((profile?.credits ?? 0) + cost);
+    } finally {
+        setIsGeneratingScene(false);
+    }
+  };
 
   const handleGenerateMultiPersonImage = useCallback(async () => {
     if (!session) {
@@ -737,8 +956,8 @@ const App: React.FC = () => {
         return;
     }
 
-    if (!prompt.trim() || !uploadedImage || !uploadedImageTwo) {
-        setError('Please upload two base images and enter a prompt.');
+    if (!sceneDescription.trim() || !uploadedImage || !uploadedImageTwo) {
+        setError('Please upload two base images and describe the scene.');
         return;
     }
 
@@ -750,10 +969,43 @@ const App: React.FC = () => {
     setError(null);
     setGeneratedImageUrls(null);
     try {
+        const placementMap: { [key: string]: string } = {
+            'side-by-side': 'Place Person 1 and Person 2 side-by-side.',
+            'p1-left': 'Place Person 1 (from the first uploaded image) on the left, and Person 2 (from the second image) on the right.',
+            'p2-left': 'Place Person 2 (from the second image) on the left, and Person 1 (from the first image) on the right.',
+            'one-in-front': 'Place one person slightly in front of the other in a natural pose.'
+        };
+        const placementText = placementMap[multiPersonPlacement];
+
+        const interactionMap: { [key:string]: string } = {
+            'neutral': 'They should have natural, neutral expressions.',
+            'smiling': 'They should be smiling happily together.',
+            'looking-at-each-other': 'They should be looking at each other.',
+            'hugging': 'They should be embracing or hugging.'
+        };
+        const interactionText = interactionMap[multiPersonInteraction];
+
+        let constructedPrompt = `
+**Placement Instructions:** ${placementText}
+**Interaction Instructions:** ${interactionText}
+**Scene Description:** ${sceneDescription.trim()}
+        `;
+
+        if (aspectRatio !== '1:1') {
+            constructedPrompt += `\n**Aspect Ratio:** The final image must have a ${aspectRatio} aspect ratio.`;
+        }
+        if (imageSize === '2048') {
+            constructedPrompt += `\n**Quality:** High resolution, 4K, ultra-detailed.`;
+        }
+        if (useStrictSizing) {
+            constructedPrompt += `\n**Sizing:** Strictly adhere to the specified dimensions and aspect ratio. Do not crop the subjects; fit the entire composition within the frame.`;
+        }
+
         const baseImagePart1 = await fileToGenerativePart(uploadedImage);
         const baseImagePart2 = await fileToGenerativePart(uploadedImageTwo);
         const styleReferencePart = styleReferenceImage ? await fileToGenerativePart(styleReferenceImage) : null;
-        const imageUrls = await generateMultiPersonImage(prompt, baseImagePart1, baseImagePart2, imageSize, aspectRatio, styleReferencePart);
+        
+        const imageUrls = await generateMultiPersonImage(constructedPrompt, baseImagePart1, baseImagePart2, imageSize, aspectRatio, styleReferencePart, useStrictSizing);
         
         setGeneratedImageUrls(imageUrls);
         setGenerationState(GenerationState.SUCCESS);
@@ -764,7 +1016,11 @@ const App: React.FC = () => {
         setGenerationState(GenerationState.ERROR);
         updateUserCredits((profile?.credits ?? 0) + cost);
     }
-  }, [prompt, uploadedImage, uploadedImageTwo, styleReferenceImage, session, profile, imageSize, aspectRatio, deductCredits, creditCostSettings]);
+  }, [
+    uploadedImage, uploadedImageTwo, styleReferenceImage, session, profile, 
+    imageSize, aspectRatio, deductCredits, useStrictSizing, creditCostSettings,
+    multiPersonPlacement, multiPersonInteraction, sceneDescription
+  ]);
   
   const handleGenerateVideo = useCallback(async () => {
     if (profile?.role !== 'admin') {
@@ -813,924 +1069,1192 @@ const App: React.FC = () => {
     }
 
   }, [prompt, uploadedImage, session, profile, generatedVideoUrl, handleModeChange, deductCredits, videoAspectRatio, videoMotionLevel, videoSeed, creditCostSettings]);
-  
-  const handleLeaveQueue = () => {
-    setQueue(q => q.filter(id => id !== visitorId));
-    setGenerationState(GenerationState.IDLE);
+
+  const handleRestoreImage = useCallback(async () => {
+    if (!uploadedImage) {
+        setError('Please upload an image to restore.');
+        return;
+    }
+    if (!Object.values(restoreOptions).some(Boolean)) {
+        setError('Please select at least one restoration feature.');
+        return;
+    }
+
+    const cost = getCost('image_restore');
+    // Restore is a premium feature for logged-in users
+    if (!session) {
+        setError("Image restoration is available for logged-in users only.");
+        setAuthModalView('sign_up');
+        return;
+    }
+
+    const canProceed = await deductCredits(cost);
+    if (!canProceed) return;
+
+    setGenerationState(GenerationState.LOADING);
+    setError(null);
+    setGeneratedImageUrls(null);
+    try {
+        const baseImagePart = await fileToGenerativePart(uploadedImage);
+        const imageUrls = await restoreImage(baseImagePart, restoreOptions);
+        
+        setGeneratedImageUrls(imageUrls);
+        setGenerationState(GenerationState.SUCCESS);
+        setHistoryImageUrls(prev => [...imageUrls, ...prev]);
+
+    } catch (err) {
+        console.error(err);
+        setError(err instanceof Error ? err.message : 'An unknown error occurred during image restoration.');
+        setGenerationState(GenerationState.ERROR);
+        updateUserCredits((profile?.credits ?? 0) + cost);
+    }
+  }, [uploadedImage, restoreOptions, session, profile, deductCredits, creditCostSettings]);
+
+  const handleEditImage = useCallback(async (
+    editPrompt: string, 
+    baseImagePart: GenerativePart, 
+    maskImagePart: GenerativePart | null
+) => {
+    if (!session) {
+        setError("Image editing is available for logged-in users only.");
+        setAuthModalView('sign_up');
+        return;
+    }
+
+    const cost = getCost('image_edit');
+    const canProceed = await deductCredits(cost);
+    if (!canProceed) return;
+
+    setGenerationState(GenerationState.LOADING); // Use main loading state
+    setError(null);
+    try {
+        const imageUrls = await editImage(editPrompt, baseImagePart, maskImagePart);
+        
+        // Update history in the advanced editor
+        setEditorHistory(prev => [...prev, ...imageUrls]);
+        setHistoryImageUrls(prev => [...imageUrls, ...prev]); // Also add to main history
+
+    } catch (err) {
+        console.error(err);
+        setError(err instanceof Error ? err.message : 'An unknown error occurred during image editing.');
+        // Don't set ERROR state here, let the modal handle its own error display
+    } finally {
+        setGenerationState(GenerationState.IDLE); // Reset main loading state
+    }
+  }, [session, profile, deductCredits, creditCostSettings]);
+
+  const generateSingleDecade = async (decade: string, imagePart: GenerativePart) => {
+    setDecadeGenerations(prev => ({
+        ...prev,
+        [decade]: { status: 'loading', url: null }
+    }));
+    try {
+        const prompt = `Reimagine the person in this photo in the style of the ${decade}. The new image should look like a genuine photograph from that era, capturing the characteristic fashion, hairstyles, photo quality (e.g., black and white, faded colors, grain), and overall aesthetic of the ${decade}.`;
+        const imageUrls = await generateImage(prompt, imagePart, '1024', '1:1', 'creative');
+        
+        setDecadeGenerations(prev => ({
+            ...prev,
+            [decade]: { status: 'success', url: imageUrls[0] }
+        }));
+    } catch (err) {
+        console.error(`Error generating for ${decade}:`, err);
+        setDecadeGenerations(prev => ({
+            ...prev,
+            [decade]: { status: 'error', url: null, error: err instanceof Error ? err.message : 'Generation failed' }
+        }));
+    }
   };
 
-  const handleCategoryClick = (title: string) => {
-    setSelectedCategory(title);
-    setShowAllPrompts(false); 
-    setPromptSearch('');
+  const handleGeneratePastForward = async () => {
+    if (!uploadedImage || selectedDecades.length === 0) {
+        setError("Please upload an image and select at least one decade.");
+        return;
+    }
+    const cost = selectedDecades.length * getCost('standard_image');
+    const canProceed = await deductCredits(cost);
+    if (!canProceed) return;
+
+    setIsGeneratingDecades(true);
+    setError(null);
+    const baseImagePart = await fileToGenerativePart(uploadedImage);
+
+    const generationPromises = selectedDecades.map(decade => generateSingleDecade(decade, baseImagePart));
+    await Promise.all(generationPromises);
+
+    setIsGeneratingDecades(false);
+  };
+
+  const handleRegenerateDecade = async (decade: string) => {
+    if (!uploadedImage) return;
+
+    const cost = getCost('standard_image');
+    const canProceed = await deductCredits(cost);
+    if (!canProceed) return;
+
+    const baseImagePart = await fileToGenerativePart(uploadedImage);
+    await generateSingleDecade(decade, baseImagePart);
+  };
+
+  const handleGenerateGraphic = async (type: 'illustration' | 'icon' | 'logo_maker' | 'pattern') => {
+    if (!graphicPrompt.trim()) {
+        setError("Please enter a prompt for your graphic.");
+        return;
+    }
+    const costKey = `graphic_${type}` as keyof Omit<CreditCostSettings, 'id'>;
+    const cost = getCost(costKey) * graphicCount;
+
+    const canProceed = await deductCredits(cost);
+    if (!canProceed) return;
+
+    setGenerationState(GenerationState.LOADING);
+    setError(null);
+    setGeneratedImageUrls(null);
+    setGeneratedSvgs(null);
+    try {
+      const imageUrls = await generateGraphic(graphicPrompt, graphicStyle, type, graphicCount);
+      setGeneratedImageUrls(imageUrls);
+      setGenerationState(GenerationState.SUCCESS);
+      setHistoryImageUrls(prev => [...imageUrls, ...prev]);
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : 'An unknown error occurred during graphic generation.');
+      setGenerationState(GenerationState.ERROR);
+      updateUserCredits((profile?.credits ?? 0) + cost);
+    }
+  };
+
+  const createGraphicSuiteHandler = (
+    costKey: keyof Omit<CreditCostSettings, 'id'>,
+    serviceFunc: (imagePart: GenerativePart, ...args: any[]) => Promise<string[]>,
+    ...args: any[]
+  ) => async () => {
+    if (!graphicImage) {
+      setError("Please upload an image.");
+      return;
+    }
+    const cost = getCost(costKey);
+    const canProceed = await deductCredits(cost);
+    if (!canProceed) return;
+
+    setGenerationState(GenerationState.LOADING);
+    setError(null);
+    setGeneratedImageUrls(null);
+    setGeneratedSvgs(null);
+
+    try {
+      const imagePart = await fileToGenerativePart(graphicImage);
+      const imageUrls = await serviceFunc(imagePart, ...args);
+      setGeneratedImageUrls(imageUrls);
+      setGenerationState(GenerationState.SUCCESS);
+      setHistoryImageUrls(prev => [...imageUrls, ...prev]);
+    } catch (err) {
+      console.error(`Error in ${costKey}:`, err);
+      setError(err instanceof Error ? err.message : `An unknown error occurred during ${costKey}.`);
+      setGenerationState(GenerationState.ERROR);
+      updateUserCredits((profile?.credits ?? 0) + cost);
+    }
+  };
+
+  const handleUpscaleGraphic = createGraphicSuiteHandler('graphic_upscale', upscaleImage);
+  const handleRemoveBackground = createGraphicSuiteHandler('graphic_remove_background', removeBackground);
+  const handleReplaceBackground = createGraphicSuiteHandler('graphic_replace_background', replaceBackground, replaceBackgroundPrompt);
+  const handleColorizeGraphic = createGraphicSuiteHandler('graphic_colorize', colorizeGraphic);
+  
+  const handleGenerateArchitecture = async () => {
+    if (!architecturePrompt.trim() || !architectureImage) {
+      setError("Please upload a base image and enter a prompt.");
+      return;
+    }
+     if (!session) {
+        setError("Architecture suite is for logged-in users only.");
+        setAuthModalView('sign_up');
+        return;
+    }
+
+    const costKey = `architecture_${architectureSuiteTool}` as keyof Omit<CreditCostSettings, 'id'>;
+    const cost = getCost(costKey);
+
+    const canProceed = await deductCredits(cost);
+    if (!canProceed) return;
+    
+    setGenerationState(GenerationState.LOADING);
+    setError(null);
+    setGeneratedImageUrls(null);
+    setGeneratedSvgs(null);
+
+    try {
+      const imagePart = await fileToGenerativePart(architectureImage);
+      const imageUrls = await generateArchitectureImage(architecturePrompt, imagePart, architectureSuiteTool);
+      setGeneratedImageUrls(imageUrls);
+      setGenerationState(GenerationState.SUCCESS);
+      setHistoryImageUrls(prev => [...imageUrls, ...prev]);
+    } catch (err) {
+      console.error(`Error generating architecture image:`, err);
+      setError(err instanceof Error ? err.message : 'An unknown error occurred during architecture generation.');
+      setGenerationState(GenerationState.ERROR);
+      updateUserCredits((profile?.credits ?? 0) + cost);
+    }
+  };
+
+  const handleClearHistory = () => {
+    if (window.confirm("Are you sure you want to clear your entire generation history? This action cannot be undone.")) {
+        setHistoryImageUrls([]);
+    }
+  };
+
+  const handleChatSendMessage = async (message: string) => {
+    if (!chatSession) {
+        const newChat = createChat();
+        setChatSession(newChat);
+        setChatMessages([{ role: 'user', text: message }]);
+        setIsChatLoading(true);
+        setChatError(null);
+        try {
+            const cost = getCost('chat_message');
+            const canProceed = await deductCredits(cost);
+            if (!canProceed) {
+                setIsChatLoading(false);
+                setChatMessages([]);
+                return;
+            }
+
+            const response = await newChat.sendMessage({ message });
+            setChatMessages(prev => [...prev, { role: 'model', text: response.text }]);
+        } catch (err) {
+            setChatError("Sorry, something went wrong. Please try again.");
+        } finally {
+            setIsChatLoading(false);
+        }
+    } else {
+        setChatMessages(prev => [...prev, { role: 'user', text: message }]);
+        setIsChatLoading(true);
+        setChatError(null);
+         try {
+             const cost = getCost('chat_message');
+            const canProceed = await deductCredits(cost);
+            if (!canProceed) {
+                setIsChatLoading(false);
+                setChatMessages(prev => prev.slice(0, -1)); // remove user message if no credits
+                return;
+            }
+
+            const response = await chatSession.sendMessage({ message });
+            setChatMessages(prev => [...prev, { role: 'model', text: response.text }]);
+        } catch (err) {
+            setChatError("Sorry, something went wrong. Please try again.");
+             setChatMessages(prev => prev.slice(0, -1)); // remove user message on error
+        } finally {
+            setIsChatLoading(false);
+        }
+    }
   };
   
-  const handleExampleClick = async (p: Prompt) => {
-    setPrompt(p.text);
-    // If the example prompt has an associated image, load it,
-    // replacing any image the user has already uploaded.
-    if (p.imageUrl) {
+  const handleDownloadAlbum = async (format: 'jpeg' | 'png') => {
+    setDownloadingFormat(format);
+    try {
+        // FIX: Use a type guard with type assertion to correctly infer types after filtering,
+        // resolving errors where properties were not found on type `unknown`.
+        const successfulGenerations = Object.entries(decadeGenerations)
+            .filter(
+                (entry): entry is [string, DecadeGeneration & { status: 'success'; url: string }] => {
+                    // `entry[1]` is inferred as `unknown`, so we must cast it to check its properties.
+                    const gen = entry[1] as DecadeGeneration;
+                    return gen.status === 'success' && gen.url !== null;
+                },
+            )
+            .map(([decade, gen]) => ({ decade, url: gen.url }));
+        
+        const albumDataUrl = await createAlbum(successfulGenerations, `image/${format}`);
+        
+        const link = document.createElement('a');
+        link.href = albumDataUrl;
+        link.download = `bestai-past-forward-album.${format}`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    } catch (e) {
+        console.error("Failed to create or download album:", e);
+        setError("Sorry, there was an error creating the album download.");
+    } finally {
+        setDownloadingFormat(null);
+    }
+  };
+
+  const handleContactSubmit = async (formData: ContactFormData) => {
+    try {
+        await adminService.submitContactForm(formData);
+        // The modal itself will show a success message.
+    } catch (err) {
+        // The modal will handle displaying its own error.
+        console.error("Contact form submission failed:", err);
+        throw err; // re-throw to be caught by the modal
+    }
+  };
+  
+  const handleLaunchApp = () => {
+    setAppLaunched(true);
+    // Maybe clean up some landing page state if needed
+  };
+
+  const handleGoHome = () => setAppLaunched(false);
+
+  // --- Admin Panel Handlers ---
+
+  const handleAdminAddPrompt = async (prompt: { text: string; imageFile: File | null }, categoryTitle: string) => {
+    try {
+      await adminService.addPrompt(prompt, categoryTitle);
+      fetchPrompts(); // Refresh prompts list
+    } catch (error) {
+      console.error("Error adding prompt:", error);
+      setError("Failed to add prompt. See console for details.");
+    }
+  };
+
+  const handleAdminRemovePrompt = async (promptId: string) => {
+    if (window.confirm("Are you sure you want to delete this prompt?")) {
       try {
-        setError(null); // Clear previous errors
-        // Check if it's a full URL or a local path
-        const imageUrl = p.imageUrl.startsWith('http') ? p.imageUrl : `${window.location.origin}${p.imageUrl}`;
-        const file = await dataUrlToFile(imageUrl, 'example-image.png');
-        handleImageChange(file);
-      } catch (e) {
-        console.error("Failed to load example image", e);
-        setError("Could not load the example image.");
+        await adminService.deletePrompt(promptId);
+        fetchPrompts(); // Refresh prompts list
+      } catch (error) {
+        console.error("Error removing prompt:", error);
+        setError("Failed to remove prompt. See console for details.");
       }
     }
   };
 
-  const handleToggleChat = () => {
-    if (!session) {
-        setAuthModalView('sign_up');
-        return;
-    }
-    
-    setIsChatOpen(prev => !prev);
-    
-    if (!chatSession) {
-        setChatSession(createChat());
-        if (chatMessages.length === 0) {
-            setChatMessages([{ role: 'model', text: "Hello! I'm your AI assistant. Ask me anything about the app or for prompt ideas!" }]);
-        }
-    }
-  };
-
-  const handleSendMessage = async (message: string) => {
-    if (!chatSession || !profile) return;
-    
-    const cost = getCost('chat_message');
-    const canProceed = await deductCredits(cost);
-    if (!canProceed) {
-        setChatError("You don't have enough credits to chat.");
-        return;
-    }
-
-    setIsChatLoading(true);
-    setChatError(null);
-    setChatMessages(prev => [...prev, { role: 'user', text: message }]);
-    
+  const handleAdminUpdatePrompt = async (promptId: string, updates: { text: string; categoryTitle: string; imageFile: File | null; removeImage: boolean }, originalImageUrl: string | null) => {
     try {
-        const response = await chatSession.sendMessage({ message });
-        setChatMessages(prev => [...prev, { role: 'model', text: response.text }]);
-    } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
-        setChatError(`Sorry, something went wrong: ${errorMessage}`);
-        setChatMessages(prev => [...prev, { role: 'model', text: `Sorry, I couldn't process that. Please try again.` }]);
-        updateUserCredits((profile?.credits ?? 0) + cost);
-    } finally {
-        setIsChatLoading(false);
-    }
-  };
-
-  const handleAddPrompt = async (prompt: { text: string; imageFile: File | null }, categoryTitle: string) => {
-    try {
-        await adminService.addPrompt(prompt, categoryTitle);
-        fetchPrompts(); // REFRESH
+      await adminService.updatePrompt(promptId, updates, originalImageUrl);
+      fetchPrompts(); // Refresh prompts list
     } catch (error) {
-        console.error("Failed to add prompt:", error);
-        setError("Could not save the new prompt.");
-    }
-  };
-
-  const handleUpdatePrompt = async (
-    promptId: string, 
-    updates: { text: string; categoryTitle: string; imageFile: File | null; removeImage: boolean },
-    originalImageUrl: string | null
-  ) => {
-    try {
-        await adminService.updatePrompt(promptId, updates, originalImageUrl);
-        fetchPrompts(); // REFRESH
-    } catch (error) {
-        console.error("Failed to update prompt:", error);
-        setError("Could not update the prompt.");
-    }
-  };
-
-  const handleRemovePrompt = async (promptId: string) => {
-    try {
-        await adminService.deletePrompt(promptId);
-        fetchPrompts(); // REFRESH
-    } catch (error) {
-        console.error("Failed to remove prompt:", error);
-        setError("Could not remove the prompt.");
+      console.error("Error updating prompt:", error);
+      setError("Failed to update prompt. See console for details.");
     }
   };
   
   const handleAdminUpdateUser = async (userId: string, updates: Partial<UserProfile>) => {
-    const updatedUser = await adminService.updateUser(userId, updates);
-    setAllUsers(prevUsers => prevUsers.map(u => u.id === userId ? updatedUser : u));
-    if (profile?.id === userId) {
-        setProfile(p => p ? { ...p, ...updatedUser } : null);
+    try {
+        await adminService.updateUser(userId, updates);
+        setAllUsers(prevUsers => prevUsers.map(u => u.id === userId ? {...u, ...updates} : u));
+    } catch(error) {
+        console.error("Error updating user from admin panel:", error);
+        // re-throw to be caught by the component
+        throw error;
     }
   };
 
   const handleAdminDeleteUser = async (userId: string) => {
-    await adminService.deleteUser(userId);
-    setAllUsers(prevUsers => prevUsers.filter(u => u.id !== userId));
+    try {
+        await adminService.deleteUser(userId);
+        setAllUsers(prevUsers => prevUsers.filter(u => u.id !== userId));
+    } catch(error) {
+        console.error("Error deleting user from admin panel:", error);
+        throw error;
+    }
   };
-  
+
   const handleAdminUpdatePlan = async (planId: number, updates: Partial<Plan>) => {
-    const updatedPlan = await adminService.updatePlan(planId, updates);
-    setPlans(prevPlans => prevPlans.map(p => p.id === planId ? updatedPlan : p));
-  }
-
-  const handleAdminUpdatePaymentSettings = async (updates: Partial<PaymentSettings>) => {
-    const updatedSettings = await adminService.updatePaymentSettings(updates);
-    setPaymentSettings(updatedSettings);
+    try {
+        const updatedPlan = await adminService.updatePlan(planId, updates);
+        setPlans(prev => prev.map(p => p.id === planId ? updatedPlan : p));
+    } catch(e) {
+        console.error("Error updating plan from admin panel:", e);
+        throw e;
+    }
   };
   
-  const handleAdminAddPlanCountryPrice = async (price: Omit<PlanCountryPrice, 'id'>) => {
-    const newPrice = await adminService.addPlanCountryPrice(price);
-    setPlanCountryPrices(prev => [...prev, newPrice]);
-  };
-    
-  const handleAdminUpdatePlanCountryPrice = async (priceId: number, updates: Partial<PlanCountryPrice>) => {
-    const updatedPrice = await adminService.updatePlanCountryPrice(priceId, updates);
-    setPlanCountryPrices(prev => prev.map(p => p.id === priceId ? updatedPrice : p));
+  const handleAdminUpdatePaymentSettings = async (updates: Partial<PaymentSettings>) => {
+     try {
+        const updatedSettings = await adminService.updatePaymentSettings(updates);
+        setPaymentSettings(updatedSettings);
+    } catch(e) {
+        console.error("Error updating payment settings from admin panel:", e);
+        throw e;
+    }
   };
 
-  const handleAdminDeletePlanCountryPrice = async (priceId: number) => {
-    await adminService.deletePlanCountryPrice(priceId);
-    setPlanCountryPrices(prev => prev.filter(p => p.id !== priceId));
+  const handleAdminAddCountryPrice = async (price: Omit<PlanCountryPrice, 'id'>) => {
+    try {
+        const newPrice = await adminService.addPlanCountryPrice(price);
+        setPlanCountryPrices(prev => [...prev, newPrice]);
+    } catch(e) {
+        console.error("Error adding country price:", e);
+        throw e;
+    }
+  };
+  const handleAdminUpdateCountryPrice = async (priceId: number, updates: Partial<PlanCountryPrice>) => {
+    try {
+        const updatedPrice = await adminService.updatePlanCountryPrice(priceId, updates);
+        setPlanCountryPrices(prev => prev.map(p => p.id === priceId ? updatedPrice : p));
+    } catch(e) {
+        console.error("Error updating country price:", e);
+        throw e;
+    }
+  };
+  const handleAdminDeleteCountryPrice = async (priceId: number) => {
+     try {
+        await adminService.deletePlanCountryPrice(priceId);
+        setPlanCountryPrices(prev => prev.filter(p => p.id !== priceId));
+    } catch(e) {
+        console.error("Error deleting country price:", e);
+        throw e;
+    }
   };
 
   const handleAdminUpdateCreditCostSettings = async (updates: Partial<Omit<CreditCostSettings, 'id'>>) => {
-    const updatedSettings = await adminService.updateCreditCostSettings(updates);
-    setCreditCostSettings(updatedSettings);
+      try {
+        const updatedCosts = await adminService.updateCreditCostSettings(updates);
+        setCreditCostSettings(updatedCosts);
+      } catch (e) {
+        console.error("Error updating credit costs:", e);
+        throw e;
+      }
   };
-
+  
   const handleAdminAddCoupon = async (couponData: Omit<Coupon, 'id' | 'created_at' | 'times_used'>) => {
-    const newCoupon = await adminService.addCoupon(couponData);
-    setCoupons(prev => [...prev, newCoupon]);
+    try {
+        const newCoupon = await adminService.addCoupon(couponData);
+        setCoupons(prev => [...prev, newCoupon]);
+    } catch (e) {
+        console.error("Error adding coupon:", e);
+        throw e;
+    }
   };
-
   const handleAdminUpdateCoupon = async (couponId: number, updates: Partial<Coupon>) => {
-    const updatedCoupon = await adminService.updateCoupon(couponId, updates);
-    setCoupons(prev => prev.map(c => c.id === couponId ? updatedCoupon : c));
+     try {
+        const updatedCoupon = await adminService.updateCoupon(couponId, updates);
+        setCoupons(prev => prev.map(c => c.id === couponId ? updatedCoupon : c));
+    } catch (e) {
+        console.error("Error updating coupon:", e);
+        throw e;
+    }
   };
-    
   const handleAdminDeleteCoupon = async (couponId: number) => {
-    await adminService.deleteCoupon(couponId);
-    setCoupons(prev => prev.filter(c => c.id !== couponId));
-  };
-
-  const handlePlanSelection = (planName: string) => {
-    if (planName === 'pro') {
-      if (session) {
-        setIsMembershipModalOpen(true); // User is logged in, wants to upgrade
-      } else {
-        setAuthModalView('sign_up'); // Visitor wants pro, needs to sign up first
-      }
-    } else if (planName === 'free') {
-      if (!session) {
-        setAuthModalView('sign_up'); // Visitor wants free, needs to sign up
-      }
+     try {
+        await adminService.deleteCoupon(couponId);
+        setCoupons(prev => prev.filter(c => c.id !== couponId));
+    } catch (e) {
+        console.error("Error deleting coupon:", e);
+        throw e;
     }
   };
 
-  const handleSignUpClick = () => {
-    pricingTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
-
-  const handleClearHistory = () => {
-    setHistoryImageUrls([]);
-  };
-
-  const isGenerating = generationState === GenerationState.LOADING || generationState === GenerationState.GENERATING_VIDEO;
-  const isQueued = generationState === GenerationState.QUEUED;
-  
-  const activeCategory = examplePrompts.find(cat => cat.title === selectedCategory) || examplePrompts[0];
-  const filteredPrompts = activeCategory?.prompts.filter(p => {
-    const text = p.text;
-    return text.toLowerCase().includes(promptSearch.toLowerCase())
-  }) || [];
-  const displayedPrompts = showAllPrompts ? filteredPrompts : filteredPrompts.slice(0, 6);
-  const totalFilteredPrompts = filteredPrompts.length;
-
-
-  const renderOutput = () => {
+  const renderGenerationResult = () => {
     switch (generationState) {
       case GenerationState.QUEUED:
-        const position = queue.indexOf(visitorId) + 1;
         return (
-          <div className="flex flex-col items-center justify-center text-center p-4 animate-fade-in w-full max-w-md">
-            <div className="relative w-24 h-24 mb-4">
-              <UsersIcon className="absolute inset-0 w-full h-full text-brand opacity-25" />
-              <UsersIcon className="absolute inset-0 w-full h-full text-brand animate-pulse-slow" />
-            </div>
-            <h2 className="text-2xl font-bold text-text-primary">You're in the queue!</h2>
-            {position > 0 ? (
-                <p className="text-lg text-text-secondary mt-2">
-                    Your position: <span className="font-bold text-brand-secondary">{position}</span> of {queue.length}
-                </p>
-            ) : (
-                <p className="text-lg text-text-secondary mt-2">Getting ready to process...</p>
-            )}
-            <p className="text-sm text-text-secondary mt-1 max-w-xs">
-              To provide a fair service, generations for free users are processed one at a time.
-            </p>
-             <button
-                onClick={handleLeaveQueue}
-                className="mt-6 px-6 py-2 bg-red-600/20 text-red-400 border border-red-500/50 rounded-lg hover:bg-red-600/40 hover:text-red-300 transition-colors duration-200"
-             >
-                Leave Queue
-             </button>
+          <div className="text-center p-4">
+            <p className="text-lg font-semibold text-brand">You're in the queue!</p>
+            <p className="text-text-secondary">Position: {queue.indexOf(visitorId) + 1} of {queue.length}.</p>
+            <p className="text-text-secondary text-sm mt-2">Please wait, your generation will start shortly.</p>
           </div>
         );
-      case GenerationState.GENERATING_VIDEO:
-        return <LoadingIndicator messages={VIDEO_LOADING_MESSAGES} IconComponent={VideoCameraIcon} />;
       case GenerationState.LOADING:
         return <LoadingIndicator />;
+      case GenerationState.GENERATING_VIDEO:
+        return <LoadingIndicator messages={VIDEO_LOADING_MESSAGES} IconComponent={VideoCameraIcon} />;
       case GenerationState.SUCCESS:
+        if (generatedImageUrls && generatedImageUrls.length > 0) {
+          return <ImageDisplay imageUrls={generatedImageUrls} />;
+        }
         if (generatedVideoUrl) {
             return <VideoPlayer videoUrl={generatedVideoUrl} />;
         }
-        return generatedImageUrls && generatedImageUrls.length > 0 && <ImageDisplay imageUrls={generatedImageUrls} />;
+        if (generatedSvgs && generatedSvgs.length > 0) {
+            // TODO: Display SVGs if needed
+            return <ImageDisplay imageUrls={generatedSvgs} />;
+        }
+        return null;
       case GenerationState.ERROR:
-        return (
-          <div className="flex flex-col items-center justify-center text-center text-red-400 bg-red-900/20 p-8 rounded-lg">
-            <h3 className="text-xl font-bold mb-2">Generation Failed</h3>
-            <p>{error}</p>
-          </div>
-        );
+        return error && <div className="text-red-400 text-center p-4 bg-red-900/30 rounded-lg border border-red-500/50">{error}</div>;
       case GenerationState.IDLE:
       default:
         return (
-          <div className="flex flex-col items-center justify-center text-center text-text-secondary">
+          <div className="flex flex-col items-center justify-center text-center text-text-secondary h-full">
             <div className="p-4 bg-panel-light rounded-full mb-4">
-              { generationMode === 'video' ? <VideoCameraIcon className="w-16 h-16 text-brand" /> : <PhotoIcon className="w-16 h-16 text-brand" /> }
+              <SparklesIcon className="w-16 h-16 text-brand" />
             </div>
-            <h2 className="text-2xl font-bold text-text-primary">{ generationMode === 'video' ? 'Ready to Create a Video?' : 'Ready to Transform Your Photo?' }</h2>
-            <p>{ generationMode === 'video' ? 'Describe the scene you want to bring to life.' : 'Upload a clear photo and describe the result you want.'}</p>
+            <h2 className="text-2xl font-bold text-text-primary">Your Creation Starts Here</h2>
+            <p>Your generated images will appear in this space.</p>
           </div>
         );
     }
   };
-
-  const renderGenerationButtonMessage = () => {
-    if (isQueued) return 'You are in line';
-    if (generationState === GenerationState.LOADING) return 'Generating Your Portrait...';
-    if (generationState === GenerationState.GENERATING_VIDEO) return 'Generating Your Video...';
-    if (generationMode === 'single' && !session && (isSystemBusy || queue.length > 0)) return `Join Queue (${queue.length} waiting)`;
-
-    if (generationMode === 'video') {
-        const cost = getCost('video_generation');
-        if ((currentCredits ?? 0) < cost) return 'Not Enough Credits';
-        return `Generate Video (${cost} Credits)`;
-    }
-    
-    const cost = imageSize === '2048' ? getCost('hd_image') : getCost('standard_image');
-    if ((currentCredits ?? 0) < cost) return 'Out of Credits';
-    return `Generate Image (${cost} Credits)`;
-  };
   
-  const renderCreditWarning = () => {
-    const cost = imageSize === '2048' ? getCost('hd_image') : getCost('standard_image');
-    if ((currentCredits ?? 0) >= cost || isGenerating || isQueued) return null;
-
-    const freePlan = plans.find(p => p.name === 'free');
-    const freeCredits = freePlan ? freePlan.credits_per_month : 50;
-
-    if (session && profile) {
-        if (profile.plan === 'pro') {
-            return <p className="text-amber-400 text-sm text-center mt-3">You're out of credits. Your credits will renew monthly.</p>;
-        }
-        return <p className="text-amber-400 text-sm text-center mt-3">You're out of credits. <button onClick={() => setIsMembershipModalOpen(true)} className="font-bold underline hover:text-amber-300">Upgrade to Pro</button> for more.</p>;
-    } else {
-        return (
-            <p className="text-amber-400 text-sm text-center mt-3">
-                You've used your daily credits. <button onClick={() => setAuthModalView('sign_up')} className="font-bold underline hover:text-amber-300">Sign Up</button> to get {freeCredits} free credits!
-            </p>
-        );
-    }
-  };
-
   const proPlan = plans.find(p => p.name === 'pro');
+  
+  if (!appLaunched) {
+      return (
+          <LandingPage
+            onLaunch={handleLaunchApp}
+            onLoginClick={() => setAuthModalView('sign_in')}
+            onSignUpClick={() => setAuthModalView('sign_up')}
+            onContactClick={() => setIsContactModalOpen(true)}
+            pricingTableRef={pricingTableRef}
+            plans={plans}
+            session={session}
+            profile={profile}
+            onSelectPlan={(planName) => {
+                if (planName === 'pro') {
+                    if (session) setIsMembershipModalOpen(true);
+                    else setAuthModalView('sign_up');
+                } else {
+                     setAuthModalView('sign_up');
+                }
+            }}
+            country={profile?.country}
+            planCountryPrices={planCountryPrices}
+          />
+      );
+  }
+  
+  const promptFocusLabels: Record<keyof typeof promptFocus, string> = {
+    pose: 'Pose & Action',
+    style: 'Style & Mood',
+    clothing: 'Clothing & Attire',
+    dimension: 'Dimension & Composition',
+    realism: 'Realism & Detail',
+    background: 'Background & Setting',
+    lighting: 'Lighting Details',
+  };
 
   return (
-    <div className="min-h-screen bg-background text-text-primary font-sans">
-      {authModalView && (
-        <Auth 
-            initialView={authModalView}
-            onClose={() => setAuthModalView(null)}
+    <div className="min-h-screen bg-background text-text-primary">
+      {isMobileSidebarOpen && <div onClick={() => setIsMobileSidebarOpen(false)} className="fixed inset-0 bg-black/60 z-40 lg:hidden"></div>}
+      <div className="flex min-h-screen">
+          <Sidebar
+              generationMode={generationMode}
+              graphicSuiteTool={graphicSuiteTool}
+              onModeChange={handleModeChange}
+              onGraphicToolChange={handleGraphicToolChange}
+              architectureSuiteTool={architectureSuiteTool}
+              onArchitectureToolChange={handleArchitectureToolChange}
+              profile={profile}
+              isCollapsed={isSidebarCollapsed}
+              onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+              isMobileOpen={isMobileSidebarOpen}
+              onMobileClose={() => setIsMobileSidebarOpen(false)}
+              onGoHome={handleGoHome}
+          />
+
+        <div className={`flex-grow transition-all duration-300 ${isSidebarCollapsed ? 'lg:ml-24' : 'lg:ml-64'}`}>
+          <main className="p-4 sm:p-6 lg:p-8">
+            <Header
+              session={session}
+              profile={profile}
+              visitorProfile={visitorProfile}
+              proPlan={proPlan}
+              onSignUpClick={() => setAuthModalView('sign_up')}
+              onLoginClick={() => setAuthModalView('sign_in')}
+              onUpgradeClick={() => setIsMembershipModalOpen(true)}
+              onAdminPanelClick={() => setIsAdminPanelOpen(true)}
+              onToggleMobileSidebar={() => setIsMobileSidebarOpen(true)}
+            />
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+              {/* Left Column: Controls */}
+              <div className="bg-panel p-6 rounded-2xl border border-border space-y-6">
+                 {/* Generation Mode specific controls */}
+                 {generationMode === 'single' && (
+                    <div className="space-y-8">
+                        {/* Step 1 */}
+                        <div>
+                            <div className="flex items-center gap-4">
+                                <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">1</div>
+                                <h3 className="text-lg font-bold text-text-primary">Upload Base Photo</h3>
+                            </div>
+                            <div className="pl-12 mt-4">
+                                <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                            </div>
+                        </div>
+
+                        {/* Step 2 */}
+                        <div>
+                            <div className="flex items-center gap-4">
+                                <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">2</div>
+                                <div>
+                                    <h3 className="text-lg font-bold text-text-primary">Get Prompt from Image <span className="text-sm font-normal text-text-secondary">(Optional)</span></h3>
+                                    <p className="text-sm text-text-secondary">Let AI describe an image to generate a new prompt.</p>
+                                </div>
+                            </div>
+                            <div className="pl-12 mt-4 space-y-4">
+                                <ImageUploader onImageChange={handlePromptGenImageChange} imageDataUrl={promptGenImageDataUrl} disabled={isGeneratingPrompt}/>
+                                <div className="p-4 bg-background border border-border rounded-lg space-y-3">
+                                    <h4 className="text-sm font-semibold">Describe these elements:</h4>
+                                    <div className="flex items-center">
+                                        <input id="focus-all" type="checkbox" ref={selectAllPromptFocusRef} onChange={handleSelectAllPromptFocus} className="h-4 w-4 rounded border-border bg-panel-light text-brand focus:ring-brand" />
+                                        <label htmlFor="focus-all" className="ml-2 text-sm font-medium">Select All</label>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                                        {Object.entries(promptFocusLabels).map(([key, label]) => (
+                                            <div key={key} className="flex items-center">
+                                                <input 
+                                                    id={`focus-${key}`}
+                                                    type="checkbox"
+                                                    checked={promptFocus[key as keyof typeof promptFocus]}
+                                                    onChange={e => setPromptFocus(p => ({...p, [key]: e.target.checked}))}
+                                                    className="h-4 w-4 rounded border-border bg-panel-light text-brand focus:ring-brand"
+                                                />
+                                                <label htmlFor={`focus-${key}`} className="ml-2">{label}</label>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <input
+                                    type="text"
+                                    value={promptKeywords}
+                                    onChange={(e) => setPromptKeywords(e.target.value)}
+                                    placeholder="Incorporate Keywords (optional): e.g., cinematic"
+                                    className="w-full p-3 bg-background border border-border rounded-lg"
+                                    disabled={isGeneratingPrompt}
+                                />
+                                <button onClick={handleGeneratePromptFromImage} disabled={!promptGenImage || isGeneratingPrompt} className="w-full flex items-center justify-center gap-2 p-3 bg-panel-light text-text-primary font-semibold rounded-lg hover:bg-border disabled:opacity-50">
+                                    <PaintBrushIcon className="w-5 h-5"/>
+                                    {isGeneratingPrompt ? 'Generating...' : `Generate Prompt (${getCost('prompt_from_image')} Credits)`}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Step 3 */}
+                        <div>
+                            <div className="flex items-center gap-4">
+                                <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">3</div>
+                                <h3 className="text-lg font-bold text-text-primary">Describe the Transformation</h3>
+                            </div>
+                            <div className="pl-12 mt-4 space-y-6">
+                                <textarea
+                                    value={prompt}
+                                    onChange={(e) => setPrompt(e.target.value)}
+                                    placeholder="e.g., A professional corporate headshot, wearing a dark suit..."
+                                    className="w-full h-28 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
+                                    disabled={generationState === GenerationState.LOADING}
+                                />
+                                 {/* Example Prompts */}
+                                <div className="space-y-4">
+                                    <p className="text-sm font-medium text-text-secondary">Or try an example:</p>
+                                    {promptsLoading ? (
+                                        <p className="text-text-secondary text-sm">Loading prompts...</p>
+                                    ) : (
+                                        <>
+                                            <input
+                                                type="text"
+                                                placeholder="Search examples..."
+                                                value={promptSearch}
+                                                onChange={e => setPromptSearch(e.target.value)}
+                                                className="w-full p-2 bg-background border border-border rounded-lg text-sm"
+                                            />
+                                            <div className="flex gap-2 overflow-x-auto pb-2">
+                                                {examplePrompts.map(category => (
+                                                    <button
+                                                        key={category.id}
+                                                        onClick={() => setSelectedCategory(category.title)}
+                                                        className={`px-3 py-1.5 text-xs font-semibold rounded-full whitespace-nowrap transition-colors ${selectedCategory === category.title ? 'bg-brand text-white' : 'bg-panel-light hover:bg-border'}`}
+                                                    >
+                                                        {category.title}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <ul className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                                {examplePrompts.find(c => c.title === selectedCategory)?.prompts.filter(p => p.text.toLowerCase().includes(promptSearch.toLowerCase())).slice(0, 3).map(p => (
+                                                    <li key={p.id} onClick={() => setPrompt(p.text)} className="relative aspect-[3/4] rounded-lg overflow-hidden group cursor-pointer border border-border">
+                                                        {p.imageUrl && <img src={p.imageUrl} alt={p.text} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />}
+                                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent"></div>
+                                                        <p className="absolute bottom-2 left-2 right-2 text-xs text-white font-medium leading-tight line-clamp-2">{p.text}</p>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </>
+                                    )}
+                                </div>
+                                {/* Generation Settings */}
+                                <div className="p-4 bg-background border border-border rounded-lg space-y-4">
+                                    <h4 className="text-sm font-semibold">Generation Settings</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-text-secondary mb-2">Generation Mode</label>
+                                            <div className="grid grid-cols-2 gap-1 bg-panel-light p-1 rounded-lg border border-border">
+                                                <button type="button" onClick={() => setGenerationFidelity('creative')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${generationFidelity === 'creative' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>Creative</button>
+                                                <button type="button" onClick={() => setGenerationFidelity('fidelity')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${generationFidelity === 'fidelity' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>Fidelity</button>
+                                            </div>
+                                        </div>
+                                        {profile?.plan === 'pro' && (
+                                        <div>
+                                            <label className="block text-sm font-medium text-text-secondary mb-2">Image Size</label>
+                                            <div className="grid grid-cols-2 gap-1 bg-panel-light p-1 rounded-lg border border-border">
+                                                <button type="button" onClick={() => setImageSize('1024')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${imageSize === '1024' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>Standard <span className="text-xs text-text-tertiary">(1024px)</span></button>
+                                                <button type="button" onClick={() => setImageSize('2048')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${imageSize === '2048' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>HD <span className="text-xs text-text-tertiary">(2048px)</span></button>
+                                            </div>
+                                        </div>
+                                        )}
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                        <input type="checkbox" checked={useCannyEdges} onChange={e => setUseCannyEdges(e.target.checked)} className="w-4 h-4 rounded text-brand focus:ring-brand bg-panel-light border-border"/>
+                                        <span>Use Canny Edges (Strictest Pose)</span>
+                                        </label>
+                                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                        <input type="checkbox" checked={useStrictSizing} onChange={e => setUseStrictSizing(e.target.checked)} className="w-4 h-4 rounded text-brand focus:ring-brand bg-panel-light border-border"/>
+                                        <span>Strict sizing</span>
+                                        </label>
+                                    </div>
+                                    {profile?.plan === 'pro' && (
+                                        <div>
+                                            <label className="block text-sm font-medium text-text-secondary mb-2">Aspect Ratio</label>
+                                            <div className="grid grid-cols-5 gap-1 bg-panel-light p-1 rounded-lg border border-border">
+                                                {(['1:1', '16:9', '9:16', '4:3', '3:4'] as const).map(ar => (
+                                                    <button key={ar} type="button" onClick={() => setAspectRatio(ar)} className={`py-1.5 text-sm font-semibold rounded-md transition-colors ${aspectRatio === ar ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>{ar}</button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                         {/* Final Button */}
+                        <div className="pt-4 border-t border-border">
+                             <button onClick={handleGenerateImage} disabled={!prompt.trim() || !uploadedImage || generationState === GenerationState.LOADING || generationState === GenerationState.QUEUED} className="w-full flex items-center justify-center gap-2 p-4 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50 text-lg">
+                                <SparklesIcon className="w-6 h-6"/>
+                                {generationState === GenerationState.QUEUED ? `In Queue (${queue.indexOf(visitorId) + 1}/${queue.length})` : `Generate Image (${getCost(imageSize === '2048' ? 'hd_image' : 'standard_image')} Credits)`}
+                            </button>
+                        </div>
+                    </div>
+                 )}
+
+                 {generationMode === 'multi' && (
+                    <div className="space-y-8">
+                        {/* Step 1: Upload Photos */}
+                        <div>
+                            <div className="flex items-center gap-4">
+                                <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">1</div>
+                                <h3 className="text-lg font-bold text-text-primary">Upload Photos</h3>
+                            </div>
+                            <div className="pl-12 mt-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <h4 className="text-sm font-semibold mb-2 text-center text-text-secondary">First Person</h4>
+                                        <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-sm font-semibold mb-2 text-center text-text-secondary">Second Person</h4>
+                                        <ImageUploader onImageChange={handleImageTwoChange} imageDataUrl={imageDataUrlTwo} disabled={generationState === GenerationState.LOADING} />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Step 2: Upload Style Reference */}
+                        <div>
+                            <div className="flex items-center gap-4">
+                                <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">2</div>
+                                <div>
+                                    <h3 className="text-lg font-bold text-text-primary">Upload Style Reference <span className="text-sm font-normal text-text-secondary">(optional)</span></h3>
+                                    <p className="text-sm text-text-secondary">Upload a third image to guide the mood, composition, and background. The people in this image will be ignored.</p>
+                                </div>
+                            </div>
+                            <div className="pl-12 mt-4 space-y-4">
+                                <ImageUploader onImageChange={handleStyleReferenceImageChange} imageDataUrl={styleReferenceImageDataUrl} disabled={generationState === GenerationState.LOADING || isGeneratingScene} />
+                                <button onClick={handleGenerateSceneFromStyle} disabled={!styleReferenceImage || isGeneratingScene} className="w-full flex items-center justify-center gap-2 p-3 bg-panel-light text-text-primary font-semibold rounded-lg hover:bg-border disabled:opacity-50">
+                                    <WandIcon className="w-5 h-5"/>
+                                    {isGeneratingScene ? 'Generating...' : `Generate Scene from Style (${getCost('prompt_from_image')} Credits)`}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Step 3: Build Your Scene */}
+                        <div>
+                            <div className="flex items-center gap-4">
+                                <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-panel-light text-text-primary font-bold rounded-full border border-border">3</div>
+                                <h3 className="text-lg font-bold text-text-primary">Build Your Scene</h3>
+                            </div>
+                            <div className="pl-12 mt-4 space-y-6">
+                                {/* Placement */}
+                                <div>
+                                    <h4 className="text-sm font-medium text-text-secondary mb-2">Placement</h4>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <SceneBuilderButton label="Side-by-side" value="side-by-side" currentValue={multiPersonPlacement} onClick={setMultiPersonPlacement} />
+                                        <SceneBuilderButton label="Person 1 on Left" value="p1-left" currentValue={multiPersonPlacement} onClick={setMultiPersonPlacement} />
+                                        <SceneBuilderButton label="Person 2 on Left" value="p2-left" currentValue={multiPersonPlacement} onClick={setMultiPersonPlacement} />
+                                        <SceneBuilderButton label="One in Front" value="one-in-front" currentValue={multiPersonPlacement} onClick={setMultiPersonPlacement} />
+                                    </div>
+                                </div>
+                                {/* Interaction */}
+                                <div>
+                                    <h4 className="text-sm font-medium text-text-secondary mb-2">Interaction</h4>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <SceneBuilderButton label="Neutral Expression" value="neutral" currentValue={multiPersonInteraction} onClick={setMultiPersonInteraction} />
+                                        <SceneBuilderButton label="Smiling Together" value="smiling" currentValue={multiPersonInteraction} onClick={setMultiPersonInteraction} />
+                                        <SceneBuilderButton label="Looking at Each Other" value="looking-at-each-other" currentValue={multiPersonInteraction} onClick={setMultiPersonInteraction} />
+                                        <SceneBuilderButton label="Hugging" value="hugging" currentValue={multiPersonInteraction} onClick={setMultiPersonInteraction} />
+                                    </div>
+                                </div>
+                                {/* Scene Description */}
+                                <div>
+                                    <h4 className="text-sm font-medium text-text-secondary mb-2">Scene Description</h4>
+                                    <textarea
+                                        value={sceneDescription}
+                                        onChange={(e) => setSceneDescription(e.target.value)}
+                                        placeholder="Describe the entire scene: the background, what they are wearing, the lighting, the overall style. e.g., 'At a beach during sunset, wearing casual summer clothes. The lighting is warm and golden. Style should be a candid, happy photograph.'"
+                                        className="w-full h-28 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
+                                        disabled={generationState === GenerationState.LOADING}
+                                    />
+                                </div>
+                                
+                                <div className="p-4 bg-background border border-border rounded-lg space-y-4">
+                                    <h4 className="text-sm font-semibold">Generation Settings</h4>
+                                    {profile?.plan === 'pro' && (
+                                        <div>
+                                            <label className="block text-sm font-medium text-text-secondary mb-2">Image Size</label>
+                                            <div className="grid grid-cols-2 gap-1 bg-panel-light p-1 rounded-lg border border-border">
+                                                <button type="button" onClick={() => setImageSize('1024')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${imageSize === '1024' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>Standard <span className="text-xs text-text-tertiary">(1024px)</span></button>
+                                                <button type="button" onClick={() => setImageSize('2048')} className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors ${imageSize === '2048' ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>HD <span className="text-xs text-text-tertiary">(2048px)</span></button>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                        <input type="checkbox" checked={useStrictSizing} onChange={e => setUseStrictSizing(e.target.checked)} className="w-4 h-4 rounded text-brand focus:ring-brand bg-panel-light border-border"/>
+                                        <span>Strict sizing</span>
+                                    </label>
+                                    {profile?.plan === 'pro' && (
+                                        <div>
+                                            <label className="block text-sm font-medium text-text-secondary mb-2">Aspect Ratio</label>
+                                            <div className="grid grid-cols-5 gap-1 bg-panel-light p-1 rounded-lg border border-border">
+                                                {(['1:1', '16:9', '9:16', '4:3', '3:4'] as const).map(ar => (
+                                                    <button key={ar} type="button" onClick={() => setAspectRatio(ar)} className={`py-1.5 text-sm font-semibold rounded-md transition-colors ${aspectRatio === ar ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}>{ar}</button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Final Button */}
+                        <div className="pt-4 border-t border-border">
+                            <button onClick={handleGenerateMultiPersonImage} disabled={!sceneDescription.trim() || !uploadedImage || !uploadedImageTwo || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-4 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50 text-lg">
+                                <SparklesIcon className="w-6 h-6"/>
+                                Generate Image ({getCost(imageSize === '2048' ? 'hd_image' : 'standard_image')} Credits)
+                            </button>
+                        </div>
+                    </div>
+                 )}
+
+                 {generationMode === 'video' && (
+                     <div className="space-y-4">
+                        <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={generationState === GenerationState.GENERATING_VIDEO} />
+                        <textarea
+                            value={prompt}
+                            onChange={(e) => setPrompt(e.target.value)}
+                            placeholder="Describe the video you want to create..."
+                            className="w-full h-28 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
+                            disabled={generationState === GenerationState.GENERATING_VIDEO}
+                        />
+                         <div className="grid grid-cols-2 gap-4">
+                            <select value={videoAspectRatio} onChange={(e) => setVideoAspectRatio(e.target.value as any)} className="w-full p-2 bg-background border border-border rounded-lg text-sm">
+                                <option value="16:9">16:9</option>
+                                <option value="9:16">9:16</option>
+                                <option value="1:1">1:1</option>
+                            </select>
+                             <div>
+                                <label className="text-xs text-text-secondary">Motion Level: {videoMotionLevel}</label>
+                                <input type="range" min="1" max="10" value={videoMotionLevel} onChange={e => setVideoMotionLevel(Number(e.target.value))} className="w-full accent-brand" />
+                            </div>
+                        </div>
+                        <div>
+                            <label className="text-xs text-text-secondary">Seed (0 for random)</label>
+                            <input type="number" value={videoSeed} onChange={e => setVideoSeed(Number(e.target.value))} className="w-full p-2 bg-background border border-border rounded-lg text-sm" />
+                        </div>
+                       <button onClick={handleGenerateVideo} disabled={!prompt.trim() || generationState === GenerationState.GENERATING_VIDEO} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                        <VideoCameraIcon className="w-5 h-5"/>
+                        Generate Video ({getCost('video_generation')} credits)
+                       </button>
+                    </div>
+                 )}
+                 
+                 {generationMode === 'restore' && (
+                     <div className="space-y-4">
+                        <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                         <div className="space-y-4 p-4 bg-background rounded-lg border border-border">
+                            <RestoreOption id="enhanceFaces" label="Enhance Faces" description="Improve clarity and detail in faces." checked={restoreOptions.enhanceFaces} onChange={e => setRestoreOptions(p => ({...p, enhanceFaces: e.target.checked}))} disabled={generationState === GenerationState.LOADING} />
+                            <RestoreOption id="removeScratches" label="Remove Scratches" description="Fix dust, scratches, and blemishes." checked={restoreOptions.removeScratches} onChange={e => setRestoreOptions(p => ({...p, removeScratches: e.target.checked}))} disabled={generationState === GenerationState.LOADING} />
+                            <RestoreOption id="colorize" label="Colorize" description="Add realistic colors to B&W photos." checked={restoreOptions.colorize} onChange={e => setRestoreOptions(p => ({...p, colorize: e.target.checked}))} disabled={generationState === GenerationState.LOADING} />
+                             <RestoreOption id="upscale" label="Upscale to 4K" description="Increase image resolution and quality." checked={restoreOptions.upscale} onChange={e => setRestoreOptions(p => ({...p, upscale: e.target.checked}))} disabled={generationState === GenerationState.LOADING} isProFeature />
+                         </div>
+                       <button onClick={handleRestoreImage} disabled={!uploadedImage || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                        <WandIcon className="w-5 h-5"/>
+                        Restore Image ({getCost('image_restore')} credits)
+                       </button>
+                    </div>
+                 )}
+
+                 {generationMode === 'past_forward' && (
+                     <div className="space-y-4">
+                        <ImageUploader onImageChange={handleImageChange} imageDataUrl={imageDataUrl} disabled={isGeneratingDecades} />
+                         <div className="space-y-2">
+                             <label className="text-sm font-semibold text-text-secondary">Select Decades</label>
+                             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                                {DECADES.map(decade => (
+                                    <button 
+                                        key={decade}
+                                        onClick={() => {
+                                            setSelectedDecades(prev => 
+                                                prev.includes(decade)
+                                                ? prev.filter(d => d !== decade)
+                                                : [...prev, decade]
+                                            )
+                                        }}
+                                        className={`w-full text-center p-2 rounded-md border text-xs font-medium transition-colors duration-200 ${selectedDecades.includes(decade) ? 'bg-brand/20 border-brand text-brand' : 'bg-panel-light border-border text-text-secondary hover:border-brand/50'}`}
+                                    >
+                                        {decade}
+                                    </button>
+                                ))}
+                             </div>
+                             <div className="flex justify-between text-xs">
+                                <button onClick={() => setSelectedDecades(DECADES)} className="text-brand hover:underline">Select All</button>
+                                <button onClick={() => setSelectedDecades([])} className="text-brand hover:underline">Deselect All</button>
+                             </div>
+                         </div>
+                       <button onClick={handleGeneratePastForward} disabled={!uploadedImage || selectedDecades.length === 0 || isGeneratingDecades} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                        <ClockRewindIcon className="w-5 h-5"/>
+                        Generate ({selectedDecades.length * getCost('standard_image')} credits)
+                       </button>
+                    </div>
+                 )}
+                 
+                 {generationMode === 'graphic_suite' && (
+                    <div className="space-y-4">
+                      {graphicSuiteTool === 'asset_generator' && (
+                         <div className="space-y-4">
+                            <div className="grid grid-cols-3 gap-2">
+                                <AssetTypeButton label="Illustration" value="illustration" currentValue={assetGeneratorTool} onClick={setAssetGeneratorTool} />
+                                <AssetTypeButton label="Icon" value="icon" currentValue={assetGeneratorTool} onClick={setAssetGeneratorTool} />
+                                <AssetTypeButton label="Pattern" value="pattern" currentValue={assetGeneratorTool} onClick={setAssetGeneratorTool} />
+                            </div>
+                            <textarea
+                                value={graphicPrompt}
+                                onChange={(e) => setGraphicPrompt(e.target.value)}
+                                placeholder={`Describe the ${assetGeneratorTool} you want...`}
+                                className="w-full h-24 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
+                                disabled={generationState === GenerationState.LOADING}
+                            />
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-xs text-text-secondary">Style</label>
+                                    <select value={graphicStyle} onChange={e => setGraphicStyle(e.target.value)} className="w-full p-2 bg-background border border-border rounded-lg text-sm">
+                                        <option>Flat</option>
+                                        <option>3D</option>
+                                        <option>Minimalist</option>
+                                        <option>Watercolor</option>
+                                        <option>Low Poly</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-xs text-text-secondary">Count: {graphicCount}</label>
+                                     <input type="range" min="1" max="4" value={graphicCount} onChange={e => setGraphicCount(Number(e.target.value))} className="w-full accent-brand" />
+                                </div>
+                            </div>
+                             <button onClick={() => handleGenerateGraphic(assetGeneratorTool)} disabled={!graphicPrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                <SparklesIcon className="w-5 h-5"/>
+                                Generate ({getCost(`graphic_${assetGeneratorTool}` as any) * graphicCount} credits)
+                             </button>
+                         </div>
+                      )}
+                      {graphicSuiteTool === 'logo_maker' && (
+                        <div className="space-y-4">
+                             <textarea
+                                value={graphicPrompt}
+                                onChange={(e) => setGraphicPrompt(e.target.value)}
+                                placeholder="Describe your brand or company..."
+                                className="w-full h-24 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
+                                disabled={generationState === GenerationState.LOADING}
+                            />
+                             <button onClick={() => handleGenerateGraphic('logo_maker')} disabled={!graphicPrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                <SparklesIcon className="w-5 h-5"/>
+                                Generate Logos ({getCost('graphic_logo_maker') * 4} credits)
+                             </button>
+                        </div>
+                      )}
+                       {graphicSuiteTool === 'photo_editor' && (
+                           <div className="space-y-4 text-center">
+                               <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                               <p className="text-text-secondary text-sm">Upload an image to open it in the Advanced Editor.</p>
+                           </div>
+                       )}
+                       {graphicSuiteTool === 'upscale' && (
+                            <div className="space-y-4">
+                                <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                                <button onClick={handleUpscaleGraphic} disabled={!graphicImage || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                    <ArrowsPointingOutIcon className="w-5 h-5"/>
+                                    Upscale Image ({getCost('graphic_upscale')} credits)
+                                </button>
+                            </div>
+                       )}
+                        {graphicSuiteTool === 'remove_background' && (
+                            <div className="space-y-4">
+                                <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                                <button onClick={handleRemoveBackground} disabled={!graphicImage || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                    <ScissorsIcon className="w-5 h-5"/>
+                                    Remove Background ({getCost('graphic_remove_background')} credits)
+                                </button>
+                            </div>
+                       )}
+                       {graphicSuiteTool === 'replace_background' && (
+                            <div className="space-y-4">
+                                <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                                 <textarea
+                                    value={replaceBackgroundPrompt}
+                                    onChange={(e) => setReplaceBackgroundPrompt(e.target.value)}
+                                    placeholder="Describe the new background..."
+                                    className="w-full h-24 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
+                                    disabled={generationState === GenerationState.LOADING}
+                                />
+                                <button onClick={handleReplaceBackground} disabled={!graphicImage || !replaceBackgroundPrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                    <GlobeAltIcon className="w-5 h-5"/>
+                                    Replace Background ({getCost('graphic_replace_background')} credits)
+                                </button>
+                            </div>
+                       )}
+                       {graphicSuiteTool === 'colorize' && (
+                            <div className="space-y-4">
+                                <ImageUploader onImageChange={handleGraphicImageChange} imageDataUrl={graphicImageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                                <button onClick={handleColorizeGraphic} disabled={!graphicImage || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                                    <SwatchIcon className="w-5 h-5"/>
+                                    Colorize Image ({getCost('graphic_colorize')} credits)
+                                </button>
+                            </div>
+                       )}
+
+                    </div>
+                 )}
+
+                 {generationMode === 'architecture_suite' && (
+                    <div className="space-y-4">
+                         <ImageUploader onImageChange={handleArchitectureImageChange} imageDataUrl={architectureImageDataUrl} disabled={generationState === GenerationState.LOADING} />
+                        <textarea
+                            value={architecturePrompt}
+                            onChange={(e) => setArchitecturePrompt(e.target.value)}
+                            placeholder="e.g., 'A modern style with large windows and a wooden facade'"
+                            className="w-full h-28 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
+                            disabled={generationState === GenerationState.LOADING}
+                        />
+                        <button onClick={handleGenerateArchitecture} disabled={!architectureImage || !architecturePrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
+                            <SparklesIcon className="w-5 h-5"/>
+                            Generate {architectureSuiteTool.charAt(0).toUpperCase() + architectureSuiteTool.slice(1)} ({getCost(`architecture_${architectureSuiteTool}` as keyof Omit<CreditCostSettings, 'id'>)} credits)
+                        </button>
+                    </div>
+                 )}
+              </div>
+
+              {/* Right Column: Display */}
+              <div className="bg-panel p-6 rounded-2xl border border-border flex items-center justify-center sticky top-8" style={{minHeight: '400px'}}>
+                  {generationMode === 'past_forward' ? (
+                      <PastForwardGrid
+                        generations={decadeGenerations}
+                        onRegenerate={handleRegenerateDecade}
+                        isGenerating={isGeneratingDecades}
+                        uploadedImage={!!uploadedImage}
+                        onDownloadAlbum={handleDownloadAlbum}
+                        downloadingFormat={downloadingFormat}
+                      />
+                  ) : renderGenerationResult() }
+              </div>
+            </div>
+            
+            {session && historyImageUrls.length > 0 && (
+                <HistoryDisplay imageUrls={historyImageUrls} onClear={handleClearHistory} />
+            )}
+
+            <Footer onContactClick={() => setIsContactModalOpen(true)} />
+          </main>
+        </div>
+      </div>
+      
+      {authModalView && <Auth initialView={authModalView} onClose={() => setAuthModalView(null)} />}
+      
+      {(isMembershipModalOpen || isMembershipPromoOpen) && proPlan && profile && (
+        <MembershipModal
+          plan={proPlan}
+          profile={profile}
+          onClose={() => {
+              setIsMembershipModalOpen(false);
+              setIsMembershipPromoOpen(false);
+          }}
+          onUpgrade={handleUpgradeToPro}
+          country={profile?.country}
+          paymentSettings={paymentSettings}
+          planCountryPrices={planCountryPrices}
+          isPromo={isMembershipPromoOpen}
         />
       )}
+
+      {isAdminPanelOpen && (
+        <AdminPanel
+            allUsers={allUsers}
+            plans={plans}
+            prompts={examplePrompts}
+            paymentSettings={paymentSettings}
+            planCountryPrices={planCountryPrices}
+            coupons={coupons}
+            creditCostSettings={creditCostSettings}
+            onAddPrompt={handleAdminAddPrompt}
+            onRemovePrompt={handleAdminRemovePrompt}
+            onUpdatePrompt={handleAdminUpdatePrompt}
+            onUpdateUser={handleAdminUpdateUser}
+            onDeleteUser={handleAdminDeleteUser}
+            onUpdatePlan={handleAdminUpdatePlan}
+            onUpdatePaymentSettings={handleAdminUpdatePaymentSettings}
+            onAddPlanCountryPrice={handleAdminAddCountryPrice}
+            onUpdatePlanCountryPrice={handleAdminUpdateCountryPrice}
+            onDeletePlanCountryPrice={handleAdminDeleteCountryPrice}
+            onUpdateCreditCostSettings={handleAdminUpdateCreditCostSettings}
+            onAddCoupon={handleAdminAddCoupon}
+            onUpdateCoupon={handleAdminUpdateCoupon}
+            onDeleteCoupon={handleAdminDeleteCoupon}
+            onClose={() => setIsAdminPanelOpen(false)}
+        />
+      )}
+
       {isContactModalOpen && (
-        <ContactModal 
+        <ContactModal
             onClose={() => setIsContactModalOpen(false)}
             session={session}
             profile={profile}
         />
       )}
-      {isAdminPanelOpen && profile?.role === 'admin' && (
-        <AdminPanel
-          allUsers={allUsers}
-          plans={plans}
-          prompts={examplePrompts}
-          paymentSettings={paymentSettings}
-          planCountryPrices={planCountryPrices}
-          coupons={coupons}
-          creditCostSettings={creditCostSettings}
-          onAddPrompt={handleAddPrompt}
-          onRemovePrompt={handleRemovePrompt}
-          onUpdatePrompt={handleUpdatePrompt}
-          onUpdateUser={handleAdminUpdateUser}
-          onDeleteUser={handleAdminDeleteUser}
-          onUpdatePlan={handleAdminUpdatePlan}
-          onUpdatePaymentSettings={handleAdminUpdatePaymentSettings}
-          onAddPlanCountryPrice={handleAdminAddPlanCountryPrice}
-          onUpdatePlanCountryPrice={handleAdminUpdatePlanCountryPrice}
-          onDeletePlanCountryPrice={handleAdminDeletePlanCountryPrice}
-          onUpdateCreditCostSettings={handleAdminUpdateCreditCostSettings}
-          onAddCoupon={handleAdminAddCoupon}
-          onUpdateCoupon={handleAdminUpdateCoupon}
-          onDeleteCoupon={handleAdminDeleteCoupon}
-          onClose={() => setIsAdminPanelOpen(false)}
-        />
-      )}
-      {(isMembershipModalOpen || isMembershipPromoOpen) && proPlan && (
-        <MembershipModal
-            plan={proPlan}
-            planCountryPrices={planCountryPrices}
-            onClose={() => {
-                setIsMembershipModalOpen(false);
-                setIsMembershipPromoOpen(false);
-            }}
-            onUpgrade={handleUpgradeToPro}
-            country={profile?.country}
-            paymentSettings={paymentSettings}
-            profile={profile}
-            isPromo={isMembershipPromoOpen}
-        />
-      )}
-      <main className="container mx-auto p-4 sm:p-6 md:p-8">
-        <Header
-          session={session}
-          profile={profile}
-          visitorProfile={visitorProfile}
-          proPlan={proPlan}
-          onSignUpClick={handleSignUpClick}
-          onLoginClick={() => setAuthModalView('sign_in')}
-          onUpgradeClick={() => setIsMembershipModalOpen(true)}
-          onAdminPanelClick={() => setIsAdminPanelOpen(prev => !prev)}
-        />
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Controls Panel */}
-          <div className="bg-panel p-6 rounded-2xl border border-border flex flex-col">
-             <div className="flex border-b border-border mb-6">
-                <button
-                    onClick={() => handleModeChange('single')}
-                    className={`px-6 py-3 text-sm font-semibold transition-colors duration-200 border-b-2 ${
-                    generationMode === 'single'
-                        ? 'border-brand text-brand'
-                        : 'border-transparent text-text-secondary hover:text-text-primary'
-                    }`}
-                >
-                    Single Person
-                </button>
-                <button
-                    onClick={() => handleModeChange('multi')}
-                    className={`px-6 py-3 text-sm font-semibold transition-colors duration-200 border-b-2 ${
-                    generationMode === 'multi'
-                        ? 'border-brand text-brand'
-                        : 'border-transparent text-text-secondary hover:text-text-primary'
-                    }`}
-                >
-                    Multi-person
-                </button>
-                {profile?.role === 'admin' && (
-                    <button
-                        onClick={() => handleModeChange('video')}
-                        className={`px-6 py-3 text-sm font-semibold transition-colors duration-200 border-b-2 ${
-                        generationMode === 'video'
-                            ? 'border-brand text-brand'
-                            : 'border-transparent text-text-secondary hover:text-text-primary'
-                        }`}
-                    >
-                        Video
-                    </button>
-                )}
-            </div>
-
-            <div className="flex-grow space-y-8">
-              {generationMode !== 'multi' ? (
-                // Single and Video mode uploader
-                <div className="flex flex-col space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">1</div>
-                    <h2 className="text-xl font-bold text-text-primary">
-                      {generationMode === 'video' ? 'Upload Reference Photo (Optional)' : 'Upload Base Photo'}
-                    </h2>
-                  </div>
-                  <ImageUploader 
-                    onImageChange={handleImageChange}
-                    imageDataUrl={imageDataUrl}
-                    disabled={isGenerating || isQueued}
-                  />
-                </div>
-              ) : (
-                // Multi mode uploaders
-                <div className="flex flex-col space-y-3 animate-fade-in">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">1</div>
-                    <h2 className="text-xl font-bold text-text-primary">Upload Photos</h2>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="flex flex-col space-y-2">
-                        <h3 className="text-md font-semibold text-text-secondary text-center">First Person</h3>
-                        <ImageUploader 
-                            onImageChange={handleImageChange}
-                            imageDataUrl={imageDataUrl}
-                            disabled={isGenerating || isQueued}
-                        />
-                    </div>
-                    <div className="flex flex-col space-y-2">
-                        <h3 className="text-md font-semibold text-text-secondary text-center">Second Person</h3>
-                        <ImageUploader 
-                            onImageChange={handleImageTwoChange}
-                            imageDataUrl={imageDataUrlTwo}
-                            disabled={isGenerating || isQueued}
-                        />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {generationMode === 'multi' && (
-                <div className="flex flex-col space-y-3 animate-fade-in">
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">2</div>
-                      <h2 className="text-xl font-bold text-text-primary">Upload Style Reference <span className="text-sm text-text-secondary">(Optional)</span></h2>
-                    </div>
-                    <p className="ml-11 -mt-2 text-sm text-text-secondary">Upload a third image to guide the mood, composition, and background. The people in this image will be ignored.</p>
-                    <ImageUploader 
-                      onImageChange={handleStyleReferenceImageChange}
-                      imageDataUrl={styleReferenceImageDataUrl}
-                      disabled={isGenerating || isQueued}
-                    />
-                </div>
-              )}
-
-
-              {/* Get Prompt from Image (Single Person Only) */}
-              {generationMode === 'single' && (
-                <div className="flex flex-col space-y-3">
-                    <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">2</div>
-                    <h2 className="text-xl font-bold text-text-primary">Get Prompt from Image <span className="text-sm text-text-secondary">(Optional)</span></h2>
-                    </div>
-                    <div className="ml-11">
-                    <p className="text-sm text-text-secondary -mt-2">Let AI describe an image to generate a new prompt.</p>
-                    <div className="flex flex-col gap-4 mt-3">
-                        <ImageUploader 
-                            onImageChange={handlePromptGenImageChange}
-                            imageDataUrl={promptGenImageDataUrl}
-                            disabled={isGenerating || isQueued || isGeneratingPrompt}
-                        />
-                        <div className="space-y-3 p-3 bg-background rounded-lg border border-border">
-                            <p className="text-sm font-semibold text-text-secondary">Advanced Options</p>
-                            <div>
-                                <label className="text-xs text-text-secondary font-medium">Describe these elements:</label>
-                                <div className="flex items-center gap-2 mt-1 mb-2">
-                                     <input
-                                        type="checkbox"
-                                        id="focus-all"
-                                        ref={selectAllPromptFocusRef}
-                                        checked={allPromptFocusSelected}
-                                        onChange={handleSelectAllPromptFocus}
-                                        className="w-4 h-4 bg-background border-border rounded text-brand focus:ring-brand focus:ring-2 disabled:opacity-50"
-                                        disabled={isGenerating || isQueued || isGeneratingPrompt}
-                                     />
-                                     <label htmlFor="focus-all" className="text-sm font-bold text-text-secondary select-none cursor-pointer">Select All</label>
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 mt-1">
-                                    {Object.keys(promptFocus).map((key) => {
-                                        const focusKey = key as keyof typeof promptFocus;
-                                        const label = { pose: 'Pose & Action', realism: 'Realism & Detail', style: 'Style & Mood', background: 'Background & Setting', clothing: 'Clothing & Attire', lighting: 'Lighting Details' }[focusKey];
-                                        return (
-                                            <div key={key} className="flex items-center gap-2">
-                                                <input
-                                                    type="checkbox"
-                                                    id={`focus-${key}`}
-                                                    checked={promptFocus[focusKey]}
-                                                    onChange={(e) => setPromptFocus(prev => ({...prev, [key]: e.target.checked }))}
-                                                    className="w-4 h-4 bg-background border-border rounded text-brand focus:ring-brand focus:ring-2 disabled:opacity-50"
-                                                    disabled={isGenerating || isQueued || isGeneratingPrompt}
-                                                />
-                                                <label htmlFor={`focus-${key}`} className="text-sm text-text-secondary select-none cursor-pointer">{label}</label>
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            </div>
-                            <div>
-                                <label htmlFor="keywords" className="text-xs text-text-secondary font-medium">Incorporate Keywords (optional):</label>
-                                <input
-                                    id="keywords"
-                                    type="text"
-                                    value={promptKeywords}
-                                    onChange={(e) => setPromptKeywords(e.target.value)}
-                                    placeholder="e.g., cinematic, realism, real life"
-                                    className="w-full mt-1 p-2 bg-panel-light border border-border rounded-lg focus:ring-1 focus:ring-brand text-sm"
-                                    disabled={isGenerating || isQueued || isGeneratingPrompt}
-                                />
-                            </div>
-                        </div>
-                        <button
-                            onClick={handleGeneratePromptFromImage}
-                            disabled={isGenerating || isQueued || isGeneratingPrompt || !promptGenImage || (currentCredits ?? 0) < getCost('prompt_from_image')}
-                            className="w-full flex items-center justify-center py-3 px-4 bg-panel-light text-text-primary font-semibold rounded-lg shadow-md hover:bg-border transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            <PhotoIcon className="w-5 h-5 mr-2" />
-                            {isGeneratingPrompt ? `Analyzing... (${getCost('prompt_from_image')} Credits)` : `Generate Prompt (${getCost('prompt_from_image')} Credits)`}
-                        </button>
-                    </div>
-                    </div>
-                </div>
-               )}
-
-              {/* Prompt Text Area */}
-              <div className="flex flex-col space-y-3">
-                 <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                       <div className="flex items-center justify-center w-8 h-8 rounded-full bg-panel-light text-brand font-bold text-sm">{generationMode === 'multi' ? '3' : (generationMode === 'video' ? '2' : '3')}</div>
-                       <h2 className="text-xl font-bold text-text-primary">{generationMode === 'video' ? 'Describe the Video' : 'Describe the Transformation'}</h2>
-                    </div>
-                    {generationMode === 'multi' && (
-                        <button
-                            onClick={() => setPrompt("Create a realistic, photorealistic image of the two people from the uploaded photos standing together. They should be looking at the camera with a natural, friendly expression. Ensure the lighting is consistent across both individuals and that they appear to be in the same environment. The background should be a simple, out-of-focus outdoor setting. Strictly use the faces and expressions from the uploaded photos.")}
-                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-panel-light text-brand rounded-md hover:bg-border transition-colors disabled:opacity-50"
-                            disabled={isGenerating || isQueued}
-                            title="Suggest a prompt for merging two people"
-                        >
-                            <SparklesIcon className="w-4 h-4" />
-                            Suggest
-                        </button>
-                    )}
-                 </div>
-                <textarea
-                  id="prompt"
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder={generationMode === 'video' ? "e.g., A neon hologram of a cat driving at top speed" : "e.g., A professional corporate headshot, wearing a dark suit..."}
-                  className="w-full h-36 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand focus:border-brand transition duration-200 resize-none placeholder-text-secondary"
-                  disabled={isGenerating || isQueued}
-                />
-              </div>
-               
-               {/* Examples Section */}
-               <div className="flex flex-col space-y-4">
-                <p className="text-md font-semibold text-text-secondary">Or try an example:</p>
-                
-                <div className="mb-1">
-                  <input
-                    type="text"
-                    value={promptSearch}
-                    onChange={(e) => setPromptSearch(e.target.value)}
-                    placeholder="Search examples..."
-                    className="w-full p-2 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand focus:border-brand transition duration-200 placeholder-text-secondary"
-                    disabled={isGenerating || isQueued || promptsLoading || examplePrompts.length === 0}
-                  />
-                </div>
-
-                {promptsLoading ? (
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-3 gap-2 pb-3 border-b border-border">
-                            <div className="h-9 bg-panel-light rounded-lg animate-pulse"></div>
-                            <div className="h-9 bg-panel-light rounded-lg animate-pulse"></div>
-                            <div className="h-9 bg-panel-light rounded-lg animate-pulse"></div>
-                        </div>
-                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                            {Array.from({ length: 4 }).map((_, i) => (
-                                <div key={i} className="aspect-square bg-panel-light rounded-lg animate-pulse"></div>
-                            ))}
-                        </div>
-                    </div>
-                ) : examplePrompts.length > 0 ? (
-                    <>
-                        <div className="grid grid-cols-3 gap-2 pb-3 border-b border-border">
-                        {examplePrompts.map((category) => (
-                            <button
-                            key={category.id}
-                            onClick={() => handleCategoryClick(category.title)}
-                            disabled={isGenerating || isQueued}
-                            className={`flex items-center justify-center text-center p-2 rounded-lg border text-xs font-medium transition-colors duration-200 disabled:opacity-50 ${
-                                selectedCategory === category.title
-                                ? 'bg-brand/10 border-brand text-brand'
-                                : 'bg-panel-light border-border text-text-secondary hover:border-brand/50 hover:text-text-primary'
-                            }`}
-                            >
-                            {category.title}
-                            </button>
-                        ))}
-                        </div>
-
-                        {filteredPrompts.length > 0 ? (
-                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                            {displayedPrompts.map((p) => {
-                            const { text, imageUrl } = p;
-
-                            return (
-                                <button
-                                    key={p.id}
-                                    onClick={() => handleExampleClick(p)}
-                                    disabled={isGenerating || isQueued}
-                                    className="group aspect-square bg-panel-light rounded-lg overflow-hidden text-left focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-panel focus:ring-brand disabled:opacity-50 transition-all duration-200 hover:scale-[1.03] disabled:transform-none"
-                                    title={text}
-                                >
-                                {imageUrl ? (
-                                    <div className="relative w-full h-full">
-                                    <img src={imageUrl} alt={text} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
-                                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-                                    <p className="absolute bottom-0 left-0 right-0 p-2 text-xs text-white font-medium leading-tight">
-                                        {text.length > 60 ? text.substring(0, 60) + '...' : text}
-                                    </p>
-                                    </div>
-                                ) : (
-                                    <div className="p-2 flex items-center justify-center h-full bg-background group-hover:bg-border transition-colors duration-200">
-                                    <p className="text-xs text-text-secondary font-medium text-center">
-                                        {text.length > 90 ? text.substring(0, 90) + '...' : text}
-                                    </p>
-                                    </div>
-                                )}
-                                </button>
-                            )
-                            })}
-                        </div>
-                        ) : (
-                        <p className="text-text-secondary text-sm px-2">No examples match your search.</p>
-                        )}
-
-                        {totalFilteredPrompts > 6 && (
-                        <button
-                            onClick={() => setShowAllPrompts(!showAllPrompts)}
-                            className="text-sm text-brand hover:underline mt-2"
-                        >
-                            {showAllPrompts ? 'Show Less' : `Show More (${totalFilteredPrompts - 6} more)`}
-                        </button>
-                        )}
-                    </>
-                ) : (
-                    <p className="text-text-secondary text-sm px-2 text-center py-4">No examples currently available.</p>
-                )}
-              </div>
-            </div>
-
-            <div className="pt-6 mt-auto border-t border-border">
-               {generationMode === 'single' && !session && (isSystemBusy || queue.length > 0) && !isQueued && (
-                <div className="flex items-center justify-center gap-2 text-sm text-brand-secondary mb-3 animate-fade-in">
-                    <UsersIcon className="w-5 h-5 animate-pulse" />
-                    <span>System is busy. Join the queue to generate.</span>
-                </div>
-              )}
-              {/* Generation Controls */}
-              {generationMode !== 'video' && (
-                <>
-                {generationMode === 'single' && session && (
-                    <div className="mb-4">
-                        <label className="text-sm font-semibold text-text-secondary mb-2 block text-center">Generation Mode</label>
-                        <div className="flex bg-background rounded-lg p-1 border border-border w-full max-w-xs mx-auto">
-                            <button
-                                onClick={() => setGenerationFidelity('creative')}
-                                disabled={isGenerating || isQueued}
-                                title="Creatively transform your image based on the prompt while keeping the face."
-                                className={`w-1/2 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-50 ${generationFidelity === 'creative' ? 'bg-panel-light text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}
-                            >
-                                Creative
-                            </button>
-                            <button
-                                onClick={() => setGenerationFidelity('fidelity')}
-                                disabled={isGenerating || isQueued}
-                                title="Exactly replicate the base photo's style and pose, and apply the prompt as a minor edit."
-                                className={`w-1/2 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-50 ${generationFidelity === 'fidelity' ? 'bg-panel-light text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}
-                            >
-                                Fidelity
-                            </button>
-                        </div>
-                         <div className="mt-3 flex justify-center items-center gap-2">
-                            <input
-                                type="checkbox"
-                                id="canny-mode"
-                                checked={useCannyEdges}
-                                onChange={(e) => setUseCannyEdges(e.target.checked)}
-                                disabled={isGenerating || isQueued}
-                                className="w-4 h-4 bg-background border-border rounded text-brand focus:ring-brand focus:ring-offset-background focus:ring-2 disabled:opacity-50"
-                            />
-                            <label htmlFor="canny-mode" className="text-sm font-medium text-text-secondary cursor-pointer" title="Uses edge detection to strictly follow the original pose and composition. Best for style changes.">
-                                Use Canny Edges (Strictest Pose)
-                            </label>
-                        </div>
-                    </div>
-                )}
-                <div className="mb-4">
-                    <label className="text-sm font-semibold text-text-secondary mb-2 block text-center">Image Size</label>
-                    <div className="flex bg-background rounded-lg p-1 border border-border w-full max-w-xs mx-auto">
-                        <button
-                            onClick={() => setImageSize('1024')}
-                            disabled={isGenerating || isQueued}
-                            className={`w-1/2 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-50 ${imageSize === '1024' ? 'bg-panel-light text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}
-                        >
-                            Standard <span className="text-xs text-text-tertiary">(1024px)</span>
-                        </button>
-                        <button
-                            onClick={() => {
-                                if (profile?.plan === 'pro') {
-                                    setImageSize('2048');
-                                } else {
-                                    if (session) {
-                                        setIsMembershipModalOpen(true);
-                                    } else {
-                                        setAuthModalView('sign_up');
-                                    }
-                                }
-                            }}
-                            disabled={isGenerating || isQueued}
-                            className={`w-1/2 py-2 text-sm font-semibold rounded-md transition-colors relative flex items-center justify-center gap-1.5 disabled:opacity-50 ${imageSize === '2048' && profile?.plan === 'pro' ? 'bg-brand-secondary text-background shadow' : 'text-text-secondary hover:bg-border'} ${profile?.plan !== 'pro' ? 'cursor-pointer' : ''}`}
-                            title={profile?.plan !== 'pro' ? 'Upgrade to Pro for HD Images' : 'Select HD Image Size'}
-                        >
-                            HD <span className="text-xs text-text-tertiary">(2048px)</span>
-                            {profile?.plan !== 'pro' && (
-                                <span className="absolute -top-2 -right-2 flex items-center gap-1 px-1.5 py-0.5 bg-brand-secondary text-background font-bold rounded-full text-[10px] leading-none">
-                                    <StarIcon className="w-2.5 h-2.5" />
-                                    PRO
-                                </span>
-                            )}
-                        </button>
-                    </div>
-                </div>
-                <div className="mb-4">
-                    <label id="aspect-ratio-label" className="text-sm font-semibold text-text-secondary mb-2 block text-center">Aspect Ratio</label>
-                    <div role="group" aria-labelledby="aspect-ratio-label" className="flex flex-wrap justify-center gap-1 bg-background rounded-lg p-1 border border-border w-full max-w-xs mx-auto">
-                        {(['1:1', '16:9', '9:16', '4:3', '3:4'] as const).map(ratio => {
-                            const isProFeature = ratio !== '1:1';
-                            const canUseFeature = profile?.plan === 'pro' || !isProFeature;
-
-                            return (
-                            <button
-                                key={ratio}
-                                onClick={() => {
-                                    if (canUseFeature) {
-                                        setAspectRatio(ratio);
-                                    } else {
-                                        if (session) {
-                                            setIsMembershipModalOpen(true);
-                                        } else {
-                                            setAuthModalView('sign_up');
-                                        }
-                                    }
-                                }}
-                                disabled={isGenerating || isQueued}
-                                className={`relative py-2 px-3 text-xs font-semibold rounded-md transition-colors disabled:opacity-50 ${aspectRatio === ratio && canUseFeature ? 'bg-panel-light text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}
-                                aria-pressed={aspectRatio === ratio && canUseFeature}
-                                title={!canUseFeature ? 'Upgrade to Pro for different aspect ratios' : `Set aspect ratio to ${ratio}`}
-                            >
-                                {ratio}
-                                {!canUseFeature && (
-                                    <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center p-0.5 bg-brand-secondary text-background font-bold rounded-full text-[9px] leading-none">
-                                        <StarIcon className="w-2.5 h-2.5" />
-                                    </span>
-                                )}
-                            </button>
-                            );
-                        })}
-                    </div>
-                </div>
-                </>
-              )}
-              {generationMode === 'video' && (
-                <div className="space-y-4 mb-4 animate-fade-in">
-                    <div className="p-4 bg-background rounded-lg border border-border space-y-4">
-                        <h4 className="text-sm font-semibold text-text-secondary text-center">Video Settings</h4>
-                        
-                        <div>
-                            <label id="video-aspect-ratio-label" className="text-xs font-medium text-text-secondary mb-1 block text-center">Aspect Ratio</label>
-                            <div role="group" aria-labelledby="video-aspect-ratio-label" className="flex justify-center gap-1 bg-panel-light rounded-lg p-1 border border-border w-full max-w-xs mx-auto">
-                                {(['16:9', '9:16', '1:1'] as const).map(ratio => (
-                                    <button
-                                        key={ratio}
-                                        onClick={() => setVideoAspectRatio(ratio)}
-                                        disabled={isGenerating || isQueued}
-                                        className={`py-2 px-3 text-xs font-semibold rounded-md transition-colors w-1/3 disabled:opacity-50 ${videoAspectRatio === ratio ? 'bg-panel text-text-primary shadow' : 'text-text-secondary hover:bg-border'}`}
-                                        aria-pressed={videoAspectRatio === ratio}
-                                        title={`Set aspect ratio to ${ratio}`}
-                                    >
-                                        {ratio}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div>
-                            <label htmlFor="motion-level" className="text-xs font-medium text-text-secondary mb-1 block text-center">Motion Level: <span className="font-bold text-text-primary">{videoMotionLevel}</span></label>
-                            <input
-                                id="motion-level"
-                                type="range"
-                                min="1"
-                                max="10"
-                                value={videoMotionLevel}
-                                onChange={(e) => setVideoMotionLevel(Number(e.target.value))}
-                                disabled={isGenerating || isQueued}
-                                className="w-full h-2 bg-panel-light rounded-lg appearance-none cursor-pointer accent-brand"
-                            />
-                        </div>
-
-                        <div>
-                             <label htmlFor="video-seed" className="text-xs font-medium text-text-secondary mb-1 block text-center">Seed (0 for random)</label>
-                             <div className="flex items-center gap-2 max-w-xs mx-auto">
-                                <input
-                                    id="video-seed"
-                                    type="number"
-                                    value={videoSeed}
-                                    onChange={(e) => setVideoSeed(Number(e.target.value))}
-                                    placeholder="Enter seed"
-                                    className="w-full p-2 bg-panel-light border border-border rounded-lg text-sm"
-                                    disabled={isGenerating || isQueued}
-                                />
-                                <button
-                                    onClick={() => setVideoSeed(Math.floor(Math.random() * 1000000))}
-                                    disabled={isGenerating || isQueued}
-                                    className="p-2 bg-panel-light text-text-secondary rounded-lg hover:bg-border disabled:opacity-50"
-                                    title="Generate random seed"
-                                >
-                                    <RefreshIcon className="w-5 h-5" />
-                                </button>
-                             </div>
-                        </div>
-                    </div>
-                </div>
-              )}
-              <button
-                onClick={generationMode === 'video' ? handleGenerateVideo : (generationMode === 'multi' ? handleGenerateMultiPersonImage : handleGenerateImage)}
-                disabled={isGenerating || isQueued || 
-                    (generationMode === 'video' && (!prompt.trim() || (currentCredits ?? 0) < getCost('video_generation') || !session)) ||
-                    (generationMode === 'single' && (!prompt.trim() || !imageDataUrl || (currentCredits ?? 0) < (imageSize === '2048' ? getCost('hd_image') : getCost('standard_image')))) ||
-                    (generationMode === 'multi' && (!prompt.trim() || !imageDataUrl || !imageDataUrlTwo || (currentCredits ?? 0) < (imageSize === '2048' ? getCost('hd_image') : getCost('standard_image'))))
-                }
-                className="w-full flex items-center justify-center py-4 px-6 bg-brand text-white font-bold rounded-lg shadow-lg hover:bg-brand-hover transform hover:-translate-y-0.5 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
-              >
-                <SparklesIcon className="w-6 h-6 mr-2" />
-                {renderGenerationButtonMessage()}
-              </button>
-              {renderCreditWarning()}
-              {error && generationState !== GenerationState.LOADING && generationState !== GenerationState.QUEUED && <p className="text-red-400 text-sm text-center mt-4">{error}</p>}
-            </div>
-          </div>
-
-          {/* Output Panel */}
-          <div className="bg-panel p-6 rounded-2xl border border-border flex items-center justify-center min-h-[400px] lg:min-h-0">
-            <div className="w-full h-full flex items-center justify-center">
-              {renderOutput()}
-            </div>
-          </div>
-        </div>
-
-        {plans.length > 0 && (
-          <PricingTable 
-            ref={pricingTableRef}
-            plans={plans}
-            session={session}
-            profile={profile}
-            onSelectPlan={handlePlanSelection}
-            country={profile?.country}
-            planCountryPrices={planCountryPrices}
-          />
-        )}
-        
-        {historyImageUrls.length > 0 && (
-          <HistoryDisplay
-            imageUrls={historyImageUrls}
-            onClear={handleClearHistory}
-          />
-        )}
-
-        <Footer onContactClick={() => setIsContactModalOpen(true)} />
-      </main>
       
-      {isChatOpen && profile && (
+      {session && isChatOpen && profile && (
         <ChatBox
             messages={chatMessages}
             isLoading={isChatLoading}
             error={chatError}
             profile={profile}
             onClose={() => setIsChatOpen(false)}
-            onSendMessage={handleSendMessage}
+            onSendMessage={handleChatSendMessage}
             chatCreditCost={getCost('chat_message')}
         />
       )}
+
+      {session && isEditorOpen && (
+        <AdvancedEditor 
+            originalImage={graphicImage}
+            history={editorHistory}
+            isLoading={generationState === GenerationState.LOADING}
+            onClose={() => setIsEditorOpen(false)}
+            onGenerate={handleEditImage}
+            onHistoryChange={setEditorHistory}
+        />
+      )}
       
-      <button
-        onClick={handleToggleChat}
-        className="fixed bottom-6 right-6 bg-brand text-white p-4 rounded-full shadow-lg hover:bg-brand-hover transition-transform transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background focus:ring-brand"
-        aria-label="Open AI Assistant"
-        title="AI Assistant"
-      >
-        <ChatBubbleLeftRightIcon className="w-7 h-7" />
-      </button>
+      {/* Chat toggle button */}
+      {session && profile && (
+        <button
+          onClick={() => setIsChatOpen(prev => !prev)}
+          className="fixed bottom-6 right-6 w-16 h-16 bg-brand text-white rounded-full shadow-lg flex items-center justify-center transform hover:-translate-y-1 transition-transform z-50"
+          aria-label="Toggle AI Assistant"
+        >
+          {isChatOpen ? <XMarkIcon className="w-8 h-8"/> : <ChatBubbleLeftRightIcon className="w-8 h-8"/>}
+        </button>
+      )}
 
     </div>
   );

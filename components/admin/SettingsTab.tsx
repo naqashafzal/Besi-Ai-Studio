@@ -183,12 +183,25 @@ const CreditCostManager: React.FC<CreditCostManagerProps> = ({ settings, onSave 
         { key: 'hd_image', label: 'HD Image Generation (Pro)' },
         { key: 'video_generation', label: 'Video Generation (Admin)' },
         { key: 'prompt_from_image', label: 'Prompt from Image' },
+        { key: 'image_restore', label: 'Image Restoration' },
+        { key: 'image_edit', label: 'Advanced Image Edit' },
         { key: 'chat_message', label: 'AI Assistant Message' },
+        { key: 'graphic_icon', label: 'Graphic: Icon' },
+        { key: 'graphic_illustration', label: 'Graphic: Illustration' },
+        { key: 'graphic_logo_maker', label: 'Graphic: Logo Maker' },
+        { key: 'graphic_pattern', label: 'Graphic: Pattern' },
+        { key: 'graphic_upscale', label: 'Graphic: Upscale' },
+        { key: 'graphic_remove_background', label: 'Graphic: Remove BG' },
+        { key: 'graphic_replace_background', label: 'Graphic: Replace BG' },
+        { key: 'graphic_colorize', label: 'Graphic: Colorize' },
+        { key: 'architecture_exterior', label: 'Architecture: Exterior' },
+        { key: 'architecture_interior', label: 'Architecture: Interior' },
+        { key: 'architecture_landscape', label: 'Architecture: Landscape' },
     ];
 
     return (
         <div className="bg-background p-6 rounded-lg border border-border">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
                 {costFields.map(({ key, label }) => (
                      <div key={key}>
                         <label className="block text-sm font-medium text-text-secondary mb-1">{label}</label>

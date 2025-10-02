@@ -5,8 +5,16 @@
  */
 // service-worker.js
 
-// Define the target URL that we want to intercept and proxy.
-const TARGET_URL_PREFIX = 'https://generativelanguage.googleapis.com';
+// Define a function to check if a URL should be intercepted.
+const shouldIntercept = (url) => {
+  try {
+    const parsedUrl = new URL(url);
+    // Intercept any subdomain of googleapis.com or clients6.google.com
+    return parsedUrl.hostname.endsWith('googleapis.com') || parsedUrl.hostname.endsWith('clients6.google.com');
+  } catch (e) {
+    return false; // Invalid URL
+  }
+};
 
 // Installation event:
 self.addEventListener('install', (event) => {
@@ -33,14 +41,15 @@ self.addEventListener('activate', (event) => {
 // Fetch event:
 self.addEventListener('fetch', (event) => {
   try {
-    const requestUrl = event.request.url;
+    const requestUrl = new URL(event.request.url);
 
-    if (requestUrl.startsWith(TARGET_URL_PREFIX)) {
-      console.log(`Service Worker: Intercepting request to ${requestUrl}`);
+    if (shouldIntercept(requestUrl.href)) {
+      console.log(`Service Worker: Intercepting request to ${requestUrl.href}`);
 
-      const remainingPathAndQuery = requestUrl.substring(TARGET_URL_PREFIX.length);
-      const proxyUrl = `${self.location.origin}/api-proxy${remainingPathAndQuery}`;
-
+      // Rewrite the URL to point to our proxy.
+      // The proxy path will be /api-proxy/{original_hostname}{original_path_and_query}
+      const proxyUrl = `${self.location.origin}/api-proxy/${requestUrl.hostname}${requestUrl.pathname}${requestUrl.search}`;
+      
       console.log(`Service Worker: Proxying to ${proxyUrl}`);
 
       // Construct headers for the request to the proxy

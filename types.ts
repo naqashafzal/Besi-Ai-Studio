@@ -1,5 +1,3 @@
-
-
 import type { Session } from '@supabase/supabase-js';
 
 export enum GenerationState {
@@ -52,6 +50,11 @@ export interface Plan {
     sale_price?: number | null;
 }
 
+export type GraphicSuiteTool = 'asset_generator' | 'logo_maker' | 'photo_editor' | 'upscale' | 'remove_background' | 'replace_background' | 'colorize';
+
+// FIX: Added missing ArchitectureSuiteTool type definition.
+export type ArchitectureSuiteTool = 'exterior' | 'interior' | 'landscape';
+
 export interface CreditCostSettings {
     id: number;
     standard_image: number;
@@ -59,6 +62,20 @@ export interface CreditCostSettings {
     prompt_from_image: number;
     chat_message: number;
     video_generation: number;
+    image_restore: number;
+    image_edit: number;
+    graphic_icon: number;
+    graphic_illustration: number;
+    graphic_logo_maker: number;
+    graphic_pattern: number;
+    graphic_upscale: number;
+    graphic_remove_background: number;
+    graphic_replace_background: number;
+    graphic_colorize: number;
+    // FIX: Added missing properties for architecture credit costs.
+    architecture_exterior: number;
+    architecture_interior: number;
+    architecture_landscape: number;
 }
 
 export interface PlanCountryPrice {
@@ -101,6 +118,12 @@ export interface Coupon {
     times_used: number;
     is_active: boolean;
     created_at: string;
+}
+
+export interface DecadeGeneration {
+  status: 'idle' | 'loading' | 'success' | 'error';
+  url: string | null;
+  error?: string;
 }
 
 

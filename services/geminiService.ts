@@ -1,5 +1,5 @@
 import { GoogleGenAI, Modality, Chat } from "@google/genai";
-import { GenerativePart } from '../types';
+import { GenerativePart, ArchitectureSuiteTool } from '../types';
 
 // Use a placeholder key. The actual key is added by the server proxy.
 // The service worker intercepts the request and forwards it to our proxy.
@@ -51,6 +51,7 @@ export const generatePromptFromImage = async (
         background: boolean;
         clothing: boolean;
         lighting: boolean;
+        dimension: boolean;
     },
     keywords: string
 ): Promise<string> => {
@@ -83,6 +84,7 @@ export const generatePromptFromImage = async (
             background: "the background and setting",
             clothing: "the clothing and attire",
             lighting: "the lighting details",
+            dimension: "the camera angle, composition, and lens characteristics",
         };
         
         const selectedFocus = (Object.keys(focus) as Array<keyof typeof focus>)
@@ -123,6 +125,46 @@ export const generatePromptFromImage = async (
 };
 
 
+// Generates a scene description from a style reference image
+export const generateSceneDescriptionFromImage = async (image: GenerativePart): Promise<string> => {
+    try {
+        const systemInstruction = `You are an expert art director and scene describer. Your task is to analyze the provided image and generate a rich, detailed description of its environment, mood, and style. This description will be used to create a new scene for different subjects.
+
+**Core Principles:**
+1.  **Focus on the Scene, Ignore the People:** You MUST completely ignore any people, figures, or characters in the image. Do not describe their pose, clothing, or faces. Your entire focus is on the environment.
+2.  **Describe Key Elements:** Meticulously describe the following:
+    *   **Environment & Background:** The setting (e.g., enchanted forest, futuristic city, cozy cafe), key background elements, and textures.
+    *   **Lighting:** The quality, direction, and color of the light (e.g., dramatic backlighting, soft morning glow, neon city lights).
+    *   **Style & Mood:** The overall aesthetic and feeling (e.g., cinematic fantasy, gritty cyberpunk, warm and nostalgic, professional studio portrait).
+    *   **Color Palette:** The dominant colors and their interplay.
+    *   **Composition:** General framing and compositional elements of the scene itself.
+3.  **Output Format:** Provide the description as a cohesive paragraph, suitable for a text area. Example: 'At a beach during sunset, wearing casual summer clothes. The lighting is warm and golden. Style should be a candid, happy photograph.'
+4.  **No Conversational Text:** Your response must ONLY be the descriptive text itself.`;
+        
+        const userInstruction = `Analyze this image and provide a scene description based on your system instructions.`;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: {
+                parts: [
+                    { inlineData: { data: image.data, mimeType: image.mimeType } },
+                    { text: userInstruction },
+                ],
+            },
+             config: {
+                systemInstruction: systemInstruction,
+            },
+        });
+        return response.text.trim();
+    } catch (error) {
+        console.error("Error generating scene description from image:", error);
+        if (error instanceof Error) {
+          throw new Error(`Scene description generation failed: ${error.message}`);
+        }
+        throw new Error("An unknown error occurred during scene description generation.");
+    }
+};
+
 // Generates an image using the Gemini API by editing a reference image
 export const generateImage = async (
     prompt: string, 
@@ -130,11 +172,12 @@ export const generateImage = async (
     imageSize: '1024' | '2048' = '1024',
     aspectRatio: '1:1' | '16:9' | '9:16' | '4:3' | '3:4' = '1:1',
     fidelity: 'creative' | 'fidelity' = 'creative',
-    useCannyEdges: boolean = false
+    useCannyEdges: boolean = false,
+    useStrictSizing: boolean = false
 ): Promise<string[]> => {
     try {
         let finalPrompt = '';
-        const facialInstruction = "It is absolutely critical that you strictly use the face, expression, and all facial details from the uploaded base photo. Do not alter the subject's age, race, gender, or any physical characteristics. The original person must be perfectly preserved.";
+        const facialInstruction = "It is absolutely critical that you strictly use the face, expression, and all facial details from the uploaded base photo. Do not alter the subject's age, race, gender, or any physical characteristics. The original person must be perfectly preserved. Ensure the final image is clean and free of any watermarks, logos, timestamps, or graphical artifacts that may have been present in the original photo.";
 
         if (useCannyEdges) {
             finalPrompt = `INSTRUCTION: This is a high-priority Canny Edges task. You MUST apply Canny edge detection to the base photo to create a precise edge map. This edge map is a strict boundary. Your task is to use this map to perfectly and unalterably preserve the exact pose, composition, shape, and all structural details of the subject and their clothing. You are only permitted to change the style and texture as described in the user's prompt, rendered *within* these locked Canny edges. Any deviation from the edge map is a failure. ${facialInstruction}\nUSER PROMPT: "${prompt}"`;
@@ -150,6 +193,10 @@ export const generateImage = async (
 
         if (imageSize === '2048') {
             finalPrompt += `\nQUALITY: High resolution, 4K, ultra-detailed, 2048x2048 pixels.`;
+        }
+
+        if (useStrictSizing) {
+            finalPrompt += `\nSIZING: The output image must strictly adhere to the specified dimensions and aspect ratio. Do not crop the subject; fit the entire composition within the frame, letterboxing if necessary to preserve the composition.`;
         }
 
 
@@ -207,30 +254,33 @@ export const generateMultiPersonImage = async (
     baseImage2: GenerativePart,
     imageSize: '1024' | '2048' = '1024',
     aspectRatio: '1:1' | '16:9' | '9:16' | '4:3' | '3:4' = '1:1',
-    styleReferenceImage: GenerativePart | null
+    styleReferenceImage: GenerativePart | null,
+    useStrictSizing: boolean = false
 ): Promise<string[]> => {
     try {
-        const facialInstruction = "It is absolutely critical that you strictly use the face, expression, and all facial details of BOTH people from their respective base photos (the first two images). Do not alter their age, race, gender, or any physical characteristics. The original people must be perfectly preserved.";
-        let finalPrompt = '';
+        const finalPrompt = `**Task: Advanced Photo Composition**
+You are an expert photo composition AI. Your task is to composite the person from the first image ("Person 1") and the person from the second image ("Person 2") into a single, new, photorealistic scene. Follow the user's detailed instructions precisely.
 
+**Core Directives:**
+1.  **Identity Preservation (CRITICAL):** You must perfectly preserve the exact facial features, identity, expression, age, race, and gender of both individuals from their original source photos. DO NOT ALTER THEIR FACES. This is the most important rule.
+2.  **Image Sources:**
+    - The first image provided contains "Person 1".
+    - The second image provided contains "Person 2".
+    ${styleReferenceImage ? '- The third image is a STYLE REFERENCE. You must extract its aesthetic qualities (mood, lighting, color, background elements) and apply them to the new scene. CRITICALLY, YOU MUST IGNORE THE PEOPLE in the style reference image; do not use their faces or bodies.' : ''}
+3.  **Follow User Prompt:** The user's prompt below provides specific instructions for placement, interaction, and the overall scene description. Adhere to it strictly.
+4.  **Seamless Integration:** The final image must be photorealistic. Ensure lighting, shadows, and color grading are consistent across both individuals and the background to create a believable, unified image.
+5.  **Artifact Removal:** The final image must be clean and free of any watermarks, logos, timestamps, or graphical artifacts that may have been present in the original photos.
+---
+**USER PROMPT:**
+${prompt}
+    `;
         const parts: ({ inlineData: { data: string; mimeType: string; } } | { text: string; })[] = [
             { inlineData: { data: baseImage1.data, mimeType: baseImage1.mimeType } }, // Person 1
             { inlineData: { data: baseImage2.data, mimeType: baseImage2.mimeType } }, // Person 2
         ];
-
+        
         if (styleReferenceImage) {
-            finalPrompt = `INSTRUCTION: This is an advanced multi-person style transfer task. You have been provided with three images. The first two images contain Person A and Person B respectively. The third image is a style reference. Your task is to generate a new image that places Person A and Person B into a scene described by the user's prompt. You MUST adopt the overall style, composition, mood, lighting, and background from the third style reference image. CRITICAL: You MUST IGNORE the people in the style reference image; only use its aesthetic qualities. ${facialInstruction}\nUSER PROMPT: "${prompt}"`;
             parts.push({ inlineData: { data: styleReferenceImage.data, mimeType: styleReferenceImage.mimeType } }); // Style Reference
-        } else {
-            finalPrompt = `INSTRUCTION: Combine the two people from the two separate uploaded images into one cohesive scene described by the user prompt. ${facialInstruction}\nUSER PROMPT: "${prompt}"`;
-        }
-
-        if (aspectRatio !== '1:1') {
-            finalPrompt += `\nASPECT RATIO: ${aspectRatio}`;
-        }
-
-        if (imageSize === '2048') {
-            finalPrompt += `\nQUALITY: High resolution, 4K, ultra-detailed, 2048x2048 pixels.`;
         }
 
         parts.push({ text: finalPrompt });
@@ -355,4 +405,271 @@ export const generateVideo = async (
         }
         throw new Error("An unknown error occurred during video generation.");
     }
+};
+
+// Restores an image based on selected options
+export const restoreImage = async (
+    baseImage: GenerativePart,
+    options: {
+        upscale: boolean;
+        removeScratches: boolean;
+        colorize: boolean;
+        enhanceFaces: boolean;
+    }
+): Promise<string[]> => {
+    try {
+        let instructions: string[] = [];
+
+        if (options.upscale) {
+            instructions.push("Upscale this image to high resolution (4K). Enhance fine details, improve clarity, and sharpen the image without introducing artifacts.");
+        }
+        if (options.removeScratches) {
+            instructions.push("Carefully remove any scratches, dust, tears, watermarks, logos, and blemishes from the photograph. Restore damaged areas seamlessly, preserving original textures.");
+        }
+        if (options.colorize) {
+            instructions.push("Colorize this black and white photograph. Apply natural, realistic, and historically appropriate colors.");
+        }
+        if (options.enhanceFaces) {
+            instructions.push("Significantly enhance any faces in the image. Restore and clarify facial features, improve sharpness, and ensure a natural, photorealistic result.");
+        }
+
+        if (instructions.length === 0) {
+            throw new Error("No restoration options selected.");
+        }
+
+        const finalPrompt = `**Task: Advanced Image Restoration**\nFollow these instructions precisely:\n- ${instructions.join('\n- ')}\n\nPreserve the original composition and subjects of the image. The result should be a high-quality, restored version of the original photograph.`;
+
+        const parts = [
+            { inlineData: { data: baseImage.data, mimeType: baseImage.mimeType } },
+            { text: finalPrompt },
+        ];
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image-preview',
+            contents: {
+                parts: parts,
+            },
+            config: {
+                responseModalities: [Modality.IMAGE, Modality.TEXT],
+            },
+        });
+
+        const imageParts: string[] = [];
+        let textPart = "";
+        
+        for (const part of response.candidates?.[0]?.content?.parts ?? []) {
+            if (part.inlineData?.data) {
+                const base64ImageBytes = part.inlineData.data;
+                imageParts.push(`data:${part.inlineData.mimeType};base64,${base64ImageBytes}`);
+            }
+            if (part.text) {
+                textPart = part.text;
+            }
+        }
+
+        if (imageParts.length > 0) {
+            return imageParts;
+        }
+
+        if (textPart) {
+            throw new Error(`Image restoration failed: ${textPart}`);
+        }
+        
+        throw new Error("Image restoration completed, but no image was returned from the model.");
+        
+    } catch (error) {
+        console.error("Error restoring image:", error);
+        if (error instanceof Error) {
+          throw new Error(`Image restoration failed: ${error.message}`);
+        }
+        throw new Error("An unknown error occurred during image restoration.");
+    }
+};
+
+// Edits an image based on a prompt and an optional mask
+export const editImage = async (
+    prompt: string,
+    baseImage: GenerativePart,
+    maskImage: GenerativePart | null,
+): Promise<string[]> => {
+    try {
+        const parts: ({ inlineData: { data: string; mimeType: string; } } | { text: string; })[] = [
+            { inlineData: { data: baseImage.data, mimeType: baseImage.mimeType } },
+        ];
+        
+        let finalPrompt: string;
+        const baseInstruction = "You are a world-class photo editing AI, like Photoshop's generative fill. Your task is to apply the user's edit seamlessly and photorealistically. Ensure the final image is clean and free of any watermarks, logos, or artifacts from the original photo."
+
+        if (maskImage) {
+            parts.push({ inlineData: { data: maskImage.data, mimeType: maskImage.mimeType } });
+            finalPrompt = `${baseInstruction} The user has provided a mask image. Apply the edit described in the text prompt *only* to the white areas of the mask. Do not change any other part of the image.\n\n**User's Edit Instruction:** "${prompt}"`;
+        } else {
+            finalPrompt = `${baseInstruction} Apply the edit described in the text prompt to the entire image.\n\n**User's Edit Instruction:** "${prompt}"`;
+        }
+
+        parts.push({ text: finalPrompt });
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image-preview',
+            contents: {
+                parts: parts,
+            },
+            config: {
+                responseModalities: [Modality.IMAGE, Modality.TEXT],
+            },
+        });
+
+        const imageParts: string[] = [];
+        let textPart = "";
+        
+        for (const part of response.candidates?.[0]?.content?.parts ?? []) {
+            if (part.inlineData?.data) {
+                const base64ImageBytes = part.inlineData.data;
+                imageParts.push(`data:${part.inlineData.mimeType};base64,${base64ImageBytes}`);
+            }
+            if (part.text) {
+                textPart = part.text;
+            }
+        }
+
+        if (imageParts.length > 0) {
+            return imageParts;
+        }
+
+        if (textPart) {
+            throw new Error(`Image editing failed: ${textPart}`);
+        }
+        
+        throw new Error("Image editing completed, but no image was returned from the model.");
+        
+    } catch (error) {
+        console.error("Error editing image:", error);
+        if (error instanceof Error) {
+          throw new Error(`Image editing failed: ${error.message}`);
+        }
+        throw new Error("An unknown error occurred during image editing.");
+    }
+};
+
+// --- GRAPHIC SUITE ---
+
+// A generic helper for single-image generation tasks that return a single image result.
+const generateSingleImage = async (
+    prompt: string,
+    baseImage: GenerativePart
+): Promise<string[]> => {
+    try {
+        const parts = [
+            { inlineData: { data: baseImage.data, mimeType: baseImage.mimeType } },
+            { text: prompt },
+        ];
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image-preview',
+            contents: { parts: parts },
+            // FIX: Correctly define config object with responseModalities.
+            config: {
+                responseModalities: [Modality.IMAGE, Modality.TEXT],
+            },
+        });
+
+        const imageParts: string[] = [];
+        let textPart = "";
+        
+        for (const part of response.candidates?.[0]?.content?.parts ?? []) {
+            if (part.inlineData?.data) {
+                const base64ImageBytes = part.inlineData.data;
+                imageParts.push(`data:${part.inlineData.mimeType};base64,${base64ImageBytes}`);
+            }
+            if (part.text) {
+                textPart = part.text;
+            }
+        }
+
+        if (imageParts.length > 0) {
+            return imageParts;
+        }
+
+        if (textPart) {
+            throw new Error(`Image operation failed: ${textPart}`);
+        }
+        
+        throw new Error("Image operation completed, but no image was returned from the model.");
+        
+    } catch (error) {
+        console.error("Error in generateSingleImage:", error);
+        if (error instanceof Error) {
+          throw new Error(`Image operation failed: ${error.message}`);
+        }
+        throw new Error("An unknown error occurred during the image operation.");
+    }
+};
+
+// FIX: Added missing function definitions and exports for graphic suite and architecture tools.
+export const upscaleImage = (baseImage: GenerativePart): Promise<string[]> => {
+    return generateSingleImage("Upscale this image to 4K resolution. Enhance fine details, improve clarity, and sharpen the image without introducing artifacts.", baseImage);
+};
+
+export const removeBackground = (baseImage: GenerativePart): Promise<string[]> => {
+    return generateSingleImage("Remove the background from this image. The output should be the main subject on a transparent background.", baseImage);
+};
+
+export const replaceBackground = (baseImage: GenerativePart, newBackgroundPrompt: string): Promise<string[]> => {
+    return generateSingleImage(`Seamlessly replace the background of this image with the following scene: "${newBackgroundPrompt}". Ensure the lighting on the subject matches the new background.`, baseImage);
+};
+
+export const colorizeGraphic = (baseImage: GenerativePart): Promise<string[]> => {
+    return generateSingleImage("Colorize this black and white photograph. Apply natural, realistic, and historically appropriate colors.", baseImage);
+};
+
+export const generateGraphic = async (
+    prompt: string,
+    style: string,
+    type: 'illustration' | 'icon' | 'logo_maker' | 'pattern',
+    count: number
+): Promise<string[]> => {
+     try {
+        let finalPrompt = '';
+        switch (type) {
+            case 'illustration':
+                finalPrompt = `A high-quality vector illustration of ${prompt}. Style: ${style}, clean lines, vibrant colors.`;
+                break;
+            case 'icon':
+                finalPrompt = `A simple, clean, modern vector icon of ${prompt}. Style: ${style}, minimalist, easily recognizable.`;
+                break;
+            case 'pattern':
+                finalPrompt = `A seamless, repeating pattern featuring ${prompt}. Style: ${style}.`;
+                break;
+            case 'logo_maker':
+                finalPrompt = `A modern, professional logo for a company. The logo should represent: ${prompt}. Style: ${style}. Do not include any text.`;
+                break;
+        }
+        
+        const response = await ai.models.generateImages({
+            model: 'imagen-4.0-generate-001',
+            prompt: finalPrompt,
+            config: {
+              numberOfImages: count,
+              aspectRatio: '1:1',
+            },
+        });
+
+        return response.generatedImages.map(img => `data:image/png;base64,${img.image.imageBytes}`);
+
+    } catch (error) {
+        console.error(`Error generating ${type}:`, error);
+        if (error instanceof Error) {
+            throw new Error(`Graphic generation failed: ${error.message}`);
+        }
+        throw new Error(`An unknown error occurred during ${type} generation.`);
+    }
+};
+
+export const generateArchitectureImage = async (
+    prompt: string,
+    baseImage: GenerativePart,
+    tool: ArchitectureSuiteTool
+): Promise<string[]> => {
+    const instruction = `You are a world-class architectural visualization AI. Your task is to reimagine the provided architectural photo based on the user's prompt. Preserve the core structure but apply the new design vision seamlessly and photorealistically. This is for a ${tool} design.`;
+    return generateSingleImage(`${instruction}\n\nUSER PROMPT: "${prompt}"`, baseImage);
 };

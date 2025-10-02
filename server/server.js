@@ -15,8 +15,6 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 const port = process.env.PORT || 3001;
-const externalApiBaseUrl = 'https://generativelanguage.googleapis.com';
-const externalWsBaseUrl = 'wss://generativelanguage.googleapis.com';
 // Support either API key env-var variant
 const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
 
@@ -55,7 +53,6 @@ app.use('/api-proxy', proxyLimiter);
 
 // Proxy route for Gemini API calls (HTTP)
 app.use('/api-proxy', async (req, res, next) => {
-    console.log(req.ip);
     // If the request is an upgrade request, it's for WebSockets, so pass to next middleware/handler
     if (req.headers.upgrade && req.headers.upgrade.toLowerCase() === 'websocket') {
         return next(); // Pass to the WebSocket upgrade handler
@@ -74,9 +71,19 @@ app.use('/api-proxy', async (req, res, next) => {
         console.log("  Request Body (from frontend):", req.body);
     }
     try {
-        // Construct the target URL by taking the part of the path after /api-proxy/
-        const targetPath = req.url.startsWith('/') ? req.url.substring(1) : req.url;
-        let apiUrl = `${externalApiBaseUrl}/${targetPath}`;
+        // Dynamic URL construction from the request path
+        // e.g., /api-proxy/generativelanguage.googleapis.com/v1/models...
+        const match = req.originalUrl.match(/^\/api-proxy\/(.+)/);
+        if (!match) {
+            console.error('Proxy could not parse target URL from:', req.originalUrl);
+            return res.status(400).send('Invalid proxy request format.');
+        }
+
+        const targetUrlPart = match[1];
+        const targetUrl = new URL(`https://${targetUrlPart}`);
+        
+        let apiUrl = targetUrl.href;
+        const targetPath = targetUrl.pathname;
         console.log(`HTTP Proxy: Forwarding request to ${apiUrl}`);
 
         // Prepare headers for the outgoing request
@@ -275,11 +282,22 @@ server.on('upgrade', (request, socket, head) => {
 
         wss.handleUpgrade(request, socket, head, (clientWs) => {
             console.log('Client WebSocket connected to proxy for path:', pathname);
-
-            const targetPathSegment = pathname.substring('/api-proxy'.length);
+            
+            const match = pathname.match(/^\/api-proxy\/(.+)/);
+            if (!match) {
+                console.error('WS Proxy could not parse target URL from:', pathname);
+                clientWs.close(1011, 'Invalid proxy path');
+                return;
+            }
+            
+            const targetUrlPart = match[1]; // e.g., generativelanguage.googleapis.com/v1/stream...
+            const [targetHost, ...targetPathParts] = targetUrlPart.split('/');
+            const targetPath = `/${targetPathParts.join('/')}`;
+            
             const clientQuery = new URLSearchParams(requestUrl.search);
             clientQuery.set('key', apiKey);
-            const targetGeminiWsUrl = `${externalWsBaseUrl}${targetPathSegment}?${clientQuery.toString()}`;
+            
+            const targetGeminiWsUrl = `wss://${targetHost}${targetPath}?${clientQuery.toString()}`;
             console.log(`Attempting to connect to target WebSocket: ${targetGeminiWsUrl}`);
 
             const geminiWs = new WebSocket(targetGeminiWsUrl, {

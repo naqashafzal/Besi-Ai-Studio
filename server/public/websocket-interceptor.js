@@ -1,5 +1,4 @@
 (function() {
-  const TARGET_WS_HOST = 'generativelanguage.googleapis.com'; // Host to intercept
   const originalWebSocket = window.WebSocket;
 
   if (!originalWebSocket) {
@@ -10,51 +9,34 @@
   const handler = {
     construct(target, args) {
       let [url, protocols] = args;
-      //stringify url's if necessary for parsing
-      let newUrlString = typeof url === 'string' ? url : (url && typeof url.toString === 'function' ? url.toString() : null);
-      //get ready to check for host to proxy
-      let isTarget = false;
+      
+      try {
+        const urlString = String(url); // Handles both string and URL object
+        const parsedUrl = new URL(urlString);
 
-      if (newUrlString) {
-        try {
-          // For full URLs, parse string and check the host
-          if (newUrlString.startsWith('ws://') || newUrlString.startsWith('wss://')) {
-            //URL object again
-            const parsedUrl = new URL(newUrlString);
-            if (parsedUrl.host === TARGET_WS_HOST) {
-              isTarget = true;
-              //use wss if https, else ws
-              const proxyScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-              const proxyHost = window.location.host;
-              newUrlString = `${proxyScheme}://${proxyHost}/api-proxy${parsedUrl.pathname}${parsedUrl.search}`;
-            }
-          }
-        } catch (e) {
-          console.warn('[WebSocketInterceptor-Proxy] Error parsing WebSocket URL, using original:', url, e);
+        if (parsedUrl.hostname.endsWith('googleapis.com') || parsedUrl.hostname.endsWith('clients6.google.com')) {
+          const proxyScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+          const proxyHost = window.location.host;
+          const newUrl = `${proxyScheme}://${proxyHost}/api-proxy/${parsedUrl.hostname}${parsedUrl.pathname}${parsedUrl.search}`;
+          
+          console.log('[WebSocketInterceptor-Proxy] Original WebSocket URL:', urlString);
+          console.log('[WebSocketInterceptor-Proxy] Redirecting to proxy URL:', newUrl);
+          url = newUrl; // Update the URL to be used in the constructor
         }
-      } else {
-          console.warn('[WebSocketInterceptor-Proxy] WebSocket URL is not a string or stringifiable. Using original.');
+      } catch (e) {
+        // Not a valid URL, or some other error. Let it pass through to the original constructor.
+        console.warn('[WebSocketInterceptor-Proxy] Could not process WebSocket URL, using original:', url, e);
       }
-
-      if (isTarget) {
-        console.log('[WebSocketInterceptor-Proxy] Original WebSocket URL:', url);
-        console.log('[WebSocketInterceptor-Proxy] Redirecting to proxy URL:', newUrlString);
-      }
-
-      // Call the original constructor with potentially modified arguments
-      // Reflect.construct ensures 'new target(...)' behavior and correct prototype chain
+      
+      // Call original constructor with the (potentially modified) URL
       if (protocols) {
-        return Reflect.construct(target, [newUrlString, protocols]);
+        return Reflect.construct(target, [url, protocols]);
       } else {
-        return Reflect.construct(target, [newUrlString]);
+        return Reflect.construct(target, [url]);
       }
     },
     get(target, prop, receiver) {
       // Forward static property access (e.g., WebSocket.OPEN, WebSocket.CONNECTING)
-      // and prototype access to the original WebSocket constructor/prototype
-      if (prop === 'prototype') {
-        return target.prototype;
-      }
       return Reflect.get(target, prop, receiver);
     }
   };

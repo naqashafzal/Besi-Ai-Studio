@@ -1,5 +1,6 @@
 import { GenerativePart } from '../types';
 
+// FIX: Corrected typo in function name.
 export const fileToGenerativePart = (file: File): Promise<GenerativePart> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

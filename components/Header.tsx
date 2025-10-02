@@ -3,7 +3,7 @@
 import React from 'react';
 import { Session, UserProfile, VisitorProfile, Plan } from '../types';
 import { supabase } from '../services/supabaseClient';
-import { CreditIcon, LogoutIcon, UserIcon, StarIcon, KeyIcon } from './Icons';
+import { CreditIcon, LogoutIcon, UserIcon, StarIcon, KeyIcon, Bars3Icon } from './Icons';
 
 interface HeaderProps {
   session: Session | null;
@@ -14,6 +14,7 @@ interface HeaderProps {
   onLoginClick: () => void;
   onUpgradeClick: () => void;
   onAdminPanelClick: () => void;
+  onToggleMobileSidebar: () => void;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -25,13 +26,21 @@ const Header: React.FC<HeaderProps> = ({
   onLoginClick,
   onUpgradeClick,
   onAdminPanelClick,
+  onToggleMobileSidebar,
 }) => {
+  const handleLogout = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error('Error signing out:', error);
+    }
+  };
+
   const renderAuthSection = () => {
     if (session) {
       if (profile) {
         // Logged in and profile loaded
         return (
-          <div className="flex-shrink-0 flex flex-col sm:flex-row items-stretch sm:items-center gap-4 sm:gap-2 bg-panel p-3 rounded-lg border border-border self-center text-center sm:text-left animate-fade-in">
+          <div className="flex-shrink-0 flex flex-col sm:flex-row items-stretch sm:items-center gap-4 sm:gap-2 bg-panel p-4 rounded-lg border border-border text-center sm:text-left animate-fade-in">
             <div className="flex items-center justify-center sm:justify-start gap-3 px-2">
               <CreditIcon className="w-8 h-8 text-brand-secondary" />
               <div>
@@ -70,7 +79,7 @@ const Header: React.FC<HeaderProps> = ({
             <div className="flex items-center justify-center sm:justify-start gap-3 px-2">
               <div className="flex-grow">
                 <p className="text-xs text-text-secondary font-semibold truncate max-w-28" title={profile.email ?? 'No Email'}>{profile.email}</p>
-                <button onClick={() => supabase.auth.signOut()} className="text-sm text-brand font-semibold hover:underline">
+                <button onClick={handleLogout} className="text-sm text-brand font-semibold hover:underline">
                   Logout
                 </button>
               </div>
@@ -81,10 +90,10 @@ const Header: React.FC<HeaderProps> = ({
       } else {
         // Logged in, but profile is loading
         return (
-          <div className="flex-shrink-0 flex items-center gap-3 bg-panel p-3 rounded-lg border border-border self-center animate-fade-in">
+          <div className="flex-shrink-0 flex items-center gap-3 bg-panel p-4 rounded-lg border border-border animate-fade-in">
              <div className="flex-grow text-left">
                 <p className="text-xs text-text-secondary font-semibold truncate max-w-40" title={session.user.email ?? 'Loading...'}>{session.user.email}</p>
-                 <button onClick={() => supabase.auth.signOut()} className="text-sm text-brand font-semibold hover:underline">
+                 <button onClick={handleLogout} className="text-sm text-brand font-semibold hover:underline">
                    Logout
                  </button>
               </div>
@@ -95,7 +104,7 @@ const Header: React.FC<HeaderProps> = ({
     } else {
       // Logged out
       return (
-        <div className="flex-shrink-0 flex flex-col sm:flex-row items-center gap-3 self-center">
+        <div className="flex-shrink-0 flex flex-col sm:flex-row items-center gap-3">
           <div className="flex items-center gap-2 bg-panel p-2 rounded-lg border border-border w-full sm:w-auto justify-center">
             <CreditIcon className="w-6 h-6 text-brand-secondary" />
             <p className="font-semibold text-text-primary">{visitorProfile?.credits ?? 0} <span className="text-text-secondary text-sm">Daily Credits</span></p>
@@ -121,18 +130,14 @@ const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="flex flex-col md:flex-row justify-between md:items-center mb-8 md:mb-12 gap-6">
-      <div className="text-center md:text-left">
-        <div className="inline-flex flex-col items-center md:items-start">
-            <img 
-                src="https://zsdecor.pk/wp-content/uploads/2025/09/1.png" 
-                alt="BestAI Logo" 
-                className="h-12 sm:h-16 w-auto"
-            />
-            <p className="mt-1 text-lg text-brand font-medium">Portrait Generator</p>
-        </div>
-        <p className="mt-4 text-lg text-text-secondary">Create professional headshots and sci-fi characters from your photos.</p>
-      </div>
+    <header className="flex justify-between items-center mb-8 lg:justify-end">
+        <button
+            className="p-2 -ml-2 text-text-secondary lg:hidden"
+            onClick={onToggleMobileSidebar}
+            aria-label="Open menu"
+        >
+            <Bars3Icon className="w-8 h-8" />
+        </button>
       {renderAuthSection()}
     </header>
   );

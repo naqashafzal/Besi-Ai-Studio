@@ -1,10 +1,50 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/icon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale-1.0" />
-    <title>BestAI Portrait Generator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- SEO Meta Tags -->
+    <title>BestAI Studio | AI Image Generation for Portraits, Design & Architecture</title>
+    <meta name="description" content="The ultimate AI-powered creative suite. Generate professional headshots, transform architectural photos, create stunning graphics, and travel through time with our Past Forward feature. Launch the studio and start creating for free." />
+    <meta name="keywords" content="AI portrait generator, AI headshot generator, architectural visualization, AI graphic design, AI image generator, character creator, digital portrait, landscape design, interior design" />
+    <link rel="canonical" href="https://portrait.bestai.website/" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://portrait.bestai.website/" />
+    <meta property="og:title" content="BestAI Studio | AI Image Generation for Portraits, Design & Architecture" />
+    <meta property="og:description" content="The ultimate AI-powered creative suite. Generate professional headshots, transform architectural photos, create stunning graphics, and travel through time with our Past Forward feature." />
+    <meta property="og:image" content="https://portrait.bestai.website/og-image.png" />
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://portrait.bestai.website/" />
+    <meta property="twitter:title" content="BestAI Studio | AI Image Generation for Portraits, Design & Architecture" />
+    <meta property="twitter:description" content="The ultimate AI-powered creative suite. Generate professional headshots, transform architectural photos, create stunning graphics, and travel through time with our Past Forward feature." />
+    <meta property="twitter:image" content="https://portrait.bestai.website/og-image.png" />
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "BestAI Studio",
+      "description": "The ultimate AI-powered creative suite. Generate professional headshots, transform architectural photos, create stunning graphics, and travel through time with our Past Forward feature. Launch the studio and start creating for free.",
+      "url": "https://bestai.website/",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": "Any",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "screenshot": "https://portrait.bestai.website/screenshot.png"
+    }
+    </script>
+    
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -28,15 +68,26 @@
               'text-secondary': '#8E8E93',
               'text-tertiary': '#48484A',
             },
+            backgroundImage: {
+              'grid-pattern': "linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px)",
+            },
+            backgroundSize: {
+              '8': '2rem',
+            },
             animation: {
               'fade-in': 'fadeIn 0.5s ease-in-out',
               'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'develop': 'develop 1.5s ease-in-out forwards',
             },
             keyframes: {
               fadeIn: {
                 '0%': { opacity: 0 },
                 '100%': { opacity: 1 },
               },
+              develop: {
+                '0%': { filter: 'sepia(1) contrast(0.8) blur(1px)', opacity: '0.7' },
+                '100%': { filter: 'sepia(0) contrast(1) blur(0)', opacity: '1' },
+              }
             }
           }
         }
@@ -58,6 +109,15 @@
 }
 </script>
 <link rel="stylesheet" href="/index.css">
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2QS8677BPH"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-2QS8677BPH');
+</script>
 </head>
   <body class="bg-background">
     <div id="root"></div>
