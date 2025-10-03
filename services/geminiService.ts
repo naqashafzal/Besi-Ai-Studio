@@ -682,3 +682,19 @@ export const generateArchitectureImage = async (
     const instruction = `You are a world-class architectural visualization AI. Your task is to reimagine the provided architectural photo based on the user's prompt. Preserve the core structure but apply the new design vision seamlessly and photorealistically. This is for a ${tool} design.`;
     return generateSingleImage(`${instruction}\n\nUSER PROMPT: "${prompt}"`, baseImage);
 };
+
+export const generateArchitectureFromSketch = async (
+    prompt: string,
+    baseImage: GenerativePart
+): Promise<string[]> => {
+    const instruction = `You are a world-class architectural visualization AI. Your task is to transform a simple architectural sketch or line drawing into a photorealistic rendering. Use the sketch as the structural blueprint for the building. Apply the user's prompt to define the style, materials, environment, and lighting. The final output must be a high-quality, photorealistic image.`;
+    return generateSingleImage(`${instruction}\n\nUSER PROMPT: "${prompt}"`, baseImage);
+};
+
+export const applyArchitecturalPostEdit = async (
+    prompt: string,
+    baseImage: GenerativePart
+): Promise<string[]> => {
+    const instruction = `You are an expert photo editor specializing in architectural visualization. Your task is to apply a specific transformation to the provided architectural image based on the user's prompt. The changes should be seamless and photorealistic.`;
+    return generateSingleImage(`${instruction}\n\nUSER PROMPT: "${prompt}"`, baseImage);
+};

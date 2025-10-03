@@ -181,6 +181,7 @@ const Sidebar: React.FC<SidebarProps> = ({ generationMode, graphicSuiteTool, onM
   ];
   
   const architectureTools: { tool: ArchitectureSuiteTool, label: string, icon: React.ReactNode }[] = [
+      { tool: 'sketch_to_reality', label: 'Sketch to Reality', icon: <PaintBrushIcon className="w-6 h-6" /> },
       { tool: 'exterior', label: 'Exterior Design', icon: <HomeModernIcon className="w-6 h-6" /> },
       { tool: 'interior', label: 'Interior Design', icon: <PhotoIcon className="w-6 h-6" /> },
       { tool: 'landscape', label: 'Landscape Design', icon: <GlobeAltIcon className="w-6 h-6" /> },

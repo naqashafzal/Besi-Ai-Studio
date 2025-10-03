@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { GenerationState, GenerativePart, PromptCategory, Prompt, Session, UserProfile, VisitorProfile, Plan, PaymentSettings, PlanCountryPrice, ContactFormData, ChatMessage, Coupon, CreditCostSettings, DecadeGeneration, GraphicSuiteTool, ArchitectureSuiteTool } from './types';
-import { generateImage, generateMultiPersonImage, generatePromptFromImage, createChat, generateVideo, generateSceneDescriptionFromImage, restoreImage, editImage, generateGraphic, upscaleImage, removeBackground, replaceBackground, colorizeGraphic, generateArchitectureImage } from './services/geminiService';
+import { generateImage, generateMultiPersonImage, generatePromptFromImage, createChat, generateVideo, generateSceneDescriptionFromImage, restoreImage, editImage, generateGraphic, upscaleImage, removeBackground, replaceBackground, colorizeGraphic, generateArchitectureImage, generateArchitectureFromSketch, applyArchitecturalPostEdit } from './services/geminiService';
 import * as adminService from './services/adminService';
 import * as couponService from './services/couponService';
 import { supabase } from './services/supabaseClient';
@@ -206,6 +206,9 @@ const App: React.FC = () => {
   // Editor state
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editorHistory, setEditorHistory] = useState<string[]>([]);
+  // FIX: Add a new state to manage the loading status for post-edits.
+  // This prevents race conditions and resolves TypeScript errors in the render logic.
+  const [isApplyingPostEdit, setIsApplyingPostEdit] = useState(false);
 
   // Graphic Suite State
   const [graphicSuiteTool, setGraphicSuiteTool] = useState<GraphicSuiteTool>('asset_generator');
@@ -259,6 +262,8 @@ const App: React.FC = () => {
     architecture_exterior: 25,
     architecture_interior: 25,
     architecture_landscape: 25,
+    architecture_sketch_to_reality: 30,
+    architecture_post_edit: 10,
   };
 
   const getCost = (feature: keyof Omit<CreditCostSettings, 'id'>): number => {
@@ -1317,7 +1322,11 @@ const App: React.FC = () => {
 
     try {
       const imagePart = await fileToGenerativePart(architectureImage);
-      const imageUrls = await generateArchitectureImage(architecturePrompt, imagePart, architectureSuiteTool);
+      const serviceToCall = architectureSuiteTool === 'sketch_to_reality' 
+        ? generateArchitectureFromSketch 
+        : (prompt: string, image: GenerativePart) => generateArchitectureImage(prompt, image, architectureSuiteTool);
+      
+      const imageUrls = await serviceToCall(architecturePrompt, imagePart);
       setGeneratedImageUrls(imageUrls);
       setGenerationState(GenerationState.SUCCESS);
       setHistoryImageUrls(prev => [...imageUrls, ...prev]);
@@ -1328,6 +1337,55 @@ const App: React.FC = () => {
       updateUserCredits((profile?.credits ?? 0) + cost);
     }
   };
+
+    const handleApplyArchitecturalPostEdit = async (effect: string) => {
+        if (!session) {
+            setError("One-click enhancements are available for logged-in users only.");
+            handleGoToPricing();
+            return;
+        }
+        if (!generatedImageUrls || generatedImageUrls.length === 0) return;
+
+        setIsApplyingPostEdit(true);
+        const cost = getCost('architecture_post_edit');
+
+        try {
+            const canProceed = await deductCredits(cost);
+            if (!canProceed) return;
+
+            setGenerationState(GenerationState.LOADING);
+            setError(null);
+
+            try {
+                const currentImageUrl = generatedImageUrls[0];
+                const imageFile = await dataUrlToFile(currentImageUrl, 'architecture_base.png');
+                const imagePart = await fileToGenerativePart(imageFile);
+
+                let prompt = '';
+                switch (effect) {
+                    case 'day_night':
+                        prompt = 'Toggle the time of day. If it is day, make it a photorealistic night scene with warm artificial lighting. If it is night, make it a bright, sunny day.';
+                        break;
+                    case 'summer': prompt = 'Transform the season to a lush, green summer.'; break;
+                    case 'autumn': prompt = 'Transform the season to a vibrant autumn with colorful foliage.'; break;
+                    case 'winter': prompt = 'Transform the season to a snowy winter scene.'; break;
+                    case 'spring': prompt = 'Transform the season to a fresh spring with blooming flowers.'; break;
+                }
+
+                const imageUrls = await applyArchitecturalPostEdit(prompt, imagePart);
+                setGeneratedImageUrls(imageUrls);
+                setHistoryImageUrls(prev => [...imageUrls, ...prev]);
+                setGenerationState(GenerationState.SUCCESS);
+            } catch (err) {
+                console.error(err);
+                setError(err instanceof Error ? err.message : 'An unknown error occurred during the edit.');
+                setGenerationState(GenerationState.ERROR);
+                updateUserCredits((profile?.credits ?? 0) + cost);
+            }
+        } finally {
+            setIsApplyingPostEdit(false);
+        }
+    };
 
   const handleClearHistory = () => {
     if (window.confirm("Are you sure you want to clear your entire generation history? This action cannot be undone.")) {
@@ -1572,6 +1630,16 @@ const App: React.FC = () => {
     }
   };
 
+    const PostEditButton = ({ label, onClick, disabled }: { label: string, onClick: () => void, disabled: boolean }) => (
+        <button
+            onClick={onClick}
+            disabled={disabled}
+            className="w-full text-center p-2 rounded-md border text-xs font-medium transition-colors duration-200 disabled:opacity-50 bg-panel-light border-border text-text-secondary hover:border-brand/50 hover:text-text-primary"
+        >
+            {label}
+        </button>
+    );
+
   const renderGenerationResult = () => {
     switch (generationState) {
       case GenerationState.QUEUED:
@@ -1588,7 +1656,25 @@ const App: React.FC = () => {
         return <LoadingIndicator messages={VIDEO_LOADING_MESSAGES} IconComponent={VideoCameraIcon} />;
       case GenerationState.SUCCESS:
         if (generatedImageUrls && generatedImageUrls.length > 0) {
-          return <ImageDisplay imageUrls={generatedImageUrls} />;
+            return (
+                <div className="w-full flex flex-col items-center gap-4">
+                  <ImageDisplay imageUrls={generatedImageUrls} />
+                  {generationMode === 'architecture_suite' && (
+                    <div className="w-full p-4 bg-background rounded-lg border border-border space-y-3 animate-fade-in">
+                      <h3 className="text-sm font-bold text-text-primary text-center">One-Click Enhancements</h3>
+                      <div className="grid grid-cols-1 gap-2">
+                         <PostEditButton label="Toggle Day/Night" onClick={() => handleApplyArchitecturalPostEdit('day_night')} disabled={isApplyingPostEdit} />
+                      </div>
+                      <div className="grid grid-cols-4 gap-2">
+                        <PostEditButton label="Summer" onClick={() => handleApplyArchitecturalPostEdit('summer')} disabled={isApplyingPostEdit} />
+                        <PostEditButton label="Autumn" onClick={() => handleApplyArchitecturalPostEdit('autumn')} disabled={isApplyingPostEdit} />
+                        <PostEditButton label="Winter" onClick={() => handleApplyArchitecturalPostEdit('winter')} disabled={isApplyingPostEdit} />
+                        <PostEditButton label="Spring" onClick={() => handleApplyArchitecturalPostEdit('spring')} disabled={isApplyingPostEdit} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+            );
         }
         if (generatedVideoUrl) {
             return <VideoPlayer videoUrl={generatedVideoUrl} />;
@@ -2203,13 +2289,13 @@ const App: React.FC = () => {
                             <textarea
                                 value={architecturePrompt}
                                 onChange={(e) => setArchitecturePrompt(e.target.value)}
-                                placeholder="e.g., 'A modern style with large windows and a wooden facade'"
+                                placeholder={architectureSuiteTool === 'sketch_to_reality' ? "Describe the final building style, materials, and environment..." : "e.g., 'A modern style with large windows and a wooden facade'"}
                                 className="w-full h-28 p-3 bg-background border border-border rounded-lg focus:ring-2 focus:ring-brand"
                                 disabled={generationState === GenerationState.LOADING}
                             />
                             <button onClick={handleGenerateArchitecture} disabled={!architectureImage || !architecturePrompt.trim() || generationState === GenerationState.LOADING} className="w-full flex items-center justify-center gap-2 p-3 bg-brand text-white font-bold rounded-lg hover:bg-brand-hover disabled:opacity-50">
                                 <SparklesIcon className="w-5 h-5"/>
-                                Generate {architectureSuiteTool.charAt(0).toUpperCase() + architectureSuiteTool.slice(1)} ({getCost(`architecture_${architectureSuiteTool}` as keyof Omit<CreditCostSettings, 'id'>)} credits)
+                                Generate {architectureSuiteTool.charAt(0).toUpperCase() + architectureSuiteTool.slice(1).replace('_', ' ')} ({getCost(`architecture_${architectureSuiteTool}` as keyof Omit<CreditCostSettings, 'id'>)} credits)
                             </button>
                         </div>
                     )}

@@ -256,6 +256,20 @@ app.get('/service-worker.js', (req, res) => {
    return res.sendFile(path.join(publicPath, 'service-worker.js'));
 });
 
+// Redirect for common typo sitemaps.xml -> sitemap.xml
+app.get('/sitemaps.xml', (req, res) => {
+    res.redirect(301, '/sitemap.xml');
+});
+
+// Serve sitemap.xml and robots.txt from the root
+app.get('/sitemap.xml', (req, res) => {
+    res.sendFile(path.join(publicPath, 'sitemap.xml'));
+});
+
+app.get('/robots.txt', (req, res) => {
+    res.sendFile(path.join(publicPath, 'robots.txt'));
+});
+
 app.use('/public', express.static(publicPath));
 app.use(express.static(staticPath));
 

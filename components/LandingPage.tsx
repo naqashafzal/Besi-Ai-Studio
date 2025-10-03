@@ -163,16 +163,24 @@ const LandingPage: React.FC<LandingPageProps> = ({
                  <button onClick={onContactClick} className="text-text-secondary hover:text-text-primary transition-colors">Contact</button>
              </nav>
              <div className="hidden md:flex items-center gap-3">
-                 <button onClick={onLoginClick} className="px-4 py-2 bg-panel-light text-text-primary font-semibold rounded-lg hover:bg-border transition-colors">
-                    Login
-                 </button>
-                 <button onClick={() => scrollTo(pricingTableRef)} className="px-4 py-2 bg-brand text-white font-semibold rounded-lg hover:bg-brand-hover transition-colors">
-                    Sign Up
-                 </button>
+                {session ? (
+                    <button onClick={onLaunch} className="px-4 py-2 bg-brand text-white font-semibold rounded-lg hover:bg-brand-hover transition-colors">
+                        Launch Studio
+                    </button>
+                ) : (
+                    <>
+                        <button onClick={onLoginClick} className="px-4 py-2 bg-panel-light text-text-primary font-semibold rounded-lg hover:bg-border transition-colors">
+                            Login
+                        </button>
+                        <button onClick={() => scrollTo(pricingTableRef)} className="px-4 py-2 bg-brand text-white font-semibold rounded-lg hover:bg-brand-hover transition-colors">
+                            Sign Up
+                        </button>
+                    </>
+                )}
              </div>
              <div className="md:hidden">
                  <button onClick={onLaunch} className="px-4 py-2 bg-brand text-white font-semibold rounded-lg hover:bg-brand-hover transition-colors">
-                    Launch App
+                    {session ? 'Launch Studio' : 'Launch App'}
                  </button>
              </div>
           </div>
@@ -309,19 +317,19 @@ const LandingPage: React.FC<LandingPageProps> = ({
                                 </div>
                                 <div className="space-y-4">
                                      <FeatureListItem
+                                        icon={<PaintBrushIcon className="w-5 h-5" />}
+                                        title="Sketch to Reality"
+                                        description="Transform architectural line drawings into photorealistic renderings with detailed prompts."
+                                    />
+                                     <FeatureListItem
+                                        icon={<SparklesIcon className="w-5 h-5" />}
+                                        title="One-Click Enhancements"
+                                        description="Instantly change your designs from day to night or cycle through all four seasons."
+                                    />
+                                    <FeatureListItem
                                         icon={<HomeModernIcon className="w-5 h-5" />}
-                                        title="Exterior Design"
-                                        description="Transform a building's facade into different architectural styles like Modern or Victorian."
-                                    />
-                                    <FeatureListItem
-                                        icon={<PhotoIcon className="w-5 h-5" />}
-                                        title="Interior Design"
-                                        description="Reimagine any room by providing a picture and describing a new style for a stunning redesign."
-                                    />
-                                    <FeatureListItem
-                                        icon={<GlobeAltIcon className="w-5 h-5" />}
-                                        title="Landscape Design"
-                                        description="Visualize your dream garden or backyard by describing the landscape you envision."
+                                        title="Interior & Exterior Design"
+                                        description="Reimagine any room or building facade by providing a photo and describing a new style."
                                     />
                                 </div>
                             </div>

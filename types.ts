@@ -52,8 +52,7 @@ export interface Plan {
 
 export type GraphicSuiteTool = 'asset_generator' | 'logo_maker' | 'photo_editor' | 'upscale' | 'remove_background' | 'replace_background' | 'colorize';
 
-// FIX: Added missing ArchitectureSuiteTool type definition.
-export type ArchitectureSuiteTool = 'exterior' | 'interior' | 'landscape';
+export type ArchitectureSuiteTool = 'exterior' | 'interior' | 'landscape' | 'sketch_to_reality';
 
 export interface CreditCostSettings {
     id: number;
@@ -72,10 +71,11 @@ export interface CreditCostSettings {
     graphic_remove_background: number;
     graphic_replace_background: number;
     graphic_colorize: number;
-    // FIX: Added missing properties for architecture credit costs.
     architecture_exterior: number;
     architecture_interior: number;
     architecture_landscape: number;
+    architecture_sketch_to_reality: number;
+    architecture_post_edit: number;
 }
 
 export interface PlanCountryPrice {
